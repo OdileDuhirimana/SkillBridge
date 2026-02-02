@@ -2,6 +2,9 @@
 
 A comprehensive career platform that connects students, graduates, and employers through intelligent matching, real-time communication, and AI-powered career guidance.
 
+Deployment reference:
+- `docs/deployment.md` (Render backend + Vercel frontend)
+
 ## 🚀 Features
 
 ### Core Functionality
