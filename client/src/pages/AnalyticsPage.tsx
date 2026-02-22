@@ -5,8 +5,8 @@ import {
   BriefcaseIcon,
   UserGroupIcon,
   ClockIcon,
-  TrendingUpIcon,
-  TrendingDownIcon
+  ArrowTrendingUpIcon,
+  ArrowTrendingDownIcon
 } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -71,9 +71,9 @@ const AnalyticsPage: React.FC = () => {
 
   const getTrendIcon = (value: number, previousValue: number) => {
     if (value > previousValue) {
-      return <TrendingUpIcon className="h-4 w-4 text-green-500" />;
+      return <ArrowTrendingUpIcon className="h-4 w-4 text-green-500" />;
     } else if (value < previousValue) {
-      return <TrendingDownIcon className="h-4 w-4 text-red-500" />;
+      return <ArrowTrendingDownIcon className="h-4 w-4 text-red-500" />;
     }
     return null;
   };
@@ -144,7 +144,7 @@ const AnalyticsPage: React.FC = () => {
                     {analytics.profileViews}
                   </div>
                   <div className="ml-2 flex items-baseline text-sm font-semibold text-green-600">
-                    <TrendingUpIcon className="h-4 w-4" />
+                    <ArrowTrendingUpIcon className="h-4 w-4" />
                     <span className="ml-1">+12%</span>
                   </div>
                 </dd>
@@ -168,7 +168,7 @@ const AnalyticsPage: React.FC = () => {
                     {analytics.applications}
                   </div>
                   <div className="ml-2 flex items-baseline text-sm font-semibold text-green-600">
-                    <TrendingUpIcon className="h-4 w-4" />
+                    <ArrowTrendingUpIcon className="h-4 w-4" />
                     <span className="ml-1">+8%</span>
                   </div>
                 </dd>
@@ -192,7 +192,7 @@ const AnalyticsPage: React.FC = () => {
                     {analytics.interviews}
                   </div>
                   <div className="ml-2 flex items-baseline text-sm font-semibold text-green-600">
-                    <TrendingUpIcon className="h-4 w-4" />
+                    <ArrowTrendingUpIcon className="h-4 w-4" />
                     <span className="ml-1">+25%</span>
                   </div>
                 </dd>
@@ -216,7 +216,7 @@ const AnalyticsPage: React.FC = () => {
                     {analytics.connections}
                   </div>
                   <div className="ml-2 flex items-baseline text-sm font-semibold text-green-600">
-                    <TrendingUpIcon className="h-4 w-4" />
+                    <ArrowTrendingUpIcon className="h-4 w-4" />
                     <span className="ml-1">+15%</span>
                   </div>
                 </dd>

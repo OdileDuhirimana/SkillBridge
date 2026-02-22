@@ -4,6 +4,7 @@ import {
   MagnifyingGlassIcon,
   FunnelIcon,
   BuildingOfficeIcon,
+  BriefcaseIcon,
   MapPinIcon,
   UserGroupIcon,
   StarIcon,

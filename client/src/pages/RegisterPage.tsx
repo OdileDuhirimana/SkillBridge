@@ -54,7 +54,7 @@ const RegisterPage: React.FC = () => {
         lastName: formData.lastName,
         email: formData.email,
         password: formData.password,
-        role: formData.role,
+        role: formData.role as 'student' | 'employer',
       });
       navigate('/dashboard');
     } catch (err: any) {
