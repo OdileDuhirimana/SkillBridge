@@ -11,15 +11,34 @@ const { upload } = require('../utils/upload');
 const router = express.Router();
 
 // Initialize OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+const openaiApiKey = process.env.OPENAI_API_KEY;
+const openai = openaiApiKey
+  ? new OpenAI({
+      apiKey: openaiApiKey
+    })
+  : null;
+
+const ensureOpenAIConfigured = (res) => {
+  if (openai) {
+    return true;
+  }
+
+  res.status(503).json({
+    success: false,
+    message: 'AI features are currently unavailable. Configure OPENAI_API_KEY to enable this endpoint.'
+  });
+  return false;
+};
 
 // @desc    Analyze resume
 // @route   POST /api/ai/analyze-resume
 // @access  Private
 router.post('/analyze-resume', protect, upload.single('resume'), async (req, res) => {
   try {
+    if (!ensureOpenAIConfigured(res)) {
+      return;
+    }
+
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -135,6 +154,10 @@ router.post('/job-recommendations', protect, [
   body('preferences').optional().isObject().withMessage('Preferences must be an object')
 ], async (req, res) => {
   try {
+    if (!ensureOpenAIConfigured(res)) {
+      return;
+    }
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
@@ -257,6 +280,10 @@ router.post('/analyze-application', protect, [
   body('applicationId').isMongoId().withMessage('Valid application ID is required')
 ], async (req, res) => {
   try {
+    if (!ensureOpenAIConfigured(res)) {
+      return;
+    }
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
@@ -416,6 +443,10 @@ router.post('/generate-cover-letter', protect, [
   body('tone').optional().isIn(['professional', 'casual', 'enthusiastic']).withMessage('Invalid tone')
 ], async (req, res) => {
   try {
+    if (!ensureOpenAIConfigured(res)) {
+      return;
+    }
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
@@ -496,6 +527,10 @@ router.post('/generate-cover-letter', protect, [
 // @access  Private
 router.get('/career-insights', protect, async (req, res) => {
   try {
+    if (!ensureOpenAIConfigured(res)) {
+      return;
+    }
+
     const User = require('../models/User');
     const user = await User.findById(req.user.id);
 

@@ -1,21 +1,55 @@
 const admin = require('firebase-admin');
 
-// Initialize Firebase Admin SDK
-if (!admin.apps.length) {
-  const serviceAccount = {
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL
-  };
+const serviceAccount = {
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL
+};
 
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
+const hasFirebaseCredentials =
+  Boolean(serviceAccount.projectId) &&
+  Boolean(serviceAccount.privateKey) &&
+  Boolean(serviceAccount.clientEmail);
+
+let firebaseDisabledWarningShown = false;
+
+const warnFirebaseDisabled = () => {
+  if (!firebaseDisabledWarningShown) {
+    console.warn('Firebase credentials are missing. Push notifications are disabled.');
+    firebaseDisabledWarningShown = true;
+  }
+};
+
+// Initialize Firebase Admin SDK only when credentials are configured
+if (!admin.apps.length && hasFirebaseCredentials) {
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+  } catch (error) {
+    console.error('Firebase Admin initialization failed. Push notifications are disabled.', error);
+  }
+} else if (!hasFirebaseCredentials) {
+  warnFirebaseDisabled();
 }
+
+const getMessaging = () => {
+  if (!admin.apps.length) {
+    warnFirebaseDisabled();
+    return null;
+  }
+
+  return admin.messaging();
+};
 
 // Send push notification to a single device
 const sendPushNotification = async (fcmToken, notification) => {
   try {
+    const messaging = getMessaging();
+    if (!messaging) {
+      return null;
+    }
+
     const message = {
       token: fcmToken,
       notification: {
@@ -42,7 +76,7 @@ const sendPushNotification = async (fcmToken, notification) => {
       }
     };
 
-    const response = await admin.messaging().send(message);
+    const response = await messaging.send(message);
     console.log('Push notification sent:', response);
     return response;
   } catch (error) {
@@ -54,6 +88,11 @@ const sendPushNotification = async (fcmToken, notification) => {
 // Send push notification to multiple devices
 const sendBulkPushNotification = async (fcmTokens, notification) => {
   try {
+    const messaging = getMessaging();
+    if (!messaging) {
+      return null;
+    }
+
     const message = {
       tokens: fcmTokens,
       notification: {
@@ -80,7 +119,7 @@ const sendBulkPushNotification = async (fcmTokens, notification) => {
       }
     };
 
-    const response = await admin.messaging().sendMulticast(message);
+    const response = await messaging.sendMulticast(message);
     console.log('Bulk push notification sent:', response);
     return response;
   } catch (error) {
@@ -92,6 +131,11 @@ const sendBulkPushNotification = async (fcmTokens, notification) => {
 // Send push notification to a topic
 const sendTopicPushNotification = async (topic, notification) => {
   try {
+    const messaging = getMessaging();
+    if (!messaging) {
+      return null;
+    }
+
     const message = {
       topic: topic,
       notification: {
@@ -118,7 +162,7 @@ const sendTopicPushNotification = async (topic, notification) => {
       }
     };
 
-    const response = await admin.messaging().send(message);
+    const response = await messaging.send(message);
     console.log('Topic push notification sent:', response);
     return response;
   } catch (error) {
@@ -130,7 +174,12 @@ const sendTopicPushNotification = async (topic, notification) => {
 // Subscribe user to topic
 const subscribeToTopic = async (fcmTokens, topic) => {
   try {
-    const response = await admin.messaging().subscribeToTopic(fcmTokens, topic);
+    const messaging = getMessaging();
+    if (!messaging) {
+      return null;
+    }
+
+    const response = await messaging.subscribeToTopic(fcmTokens, topic);
     console.log('Subscribed to topic:', response);
     return response;
   } catch (error) {
@@ -142,7 +191,12 @@ const subscribeToTopic = async (fcmTokens, topic) => {
 // Unsubscribe user from topic
 const unsubscribeFromTopic = async (fcmTokens, topic) => {
   try {
-    const response = await admin.messaging().unsubscribeFromTopic(fcmTokens, topic);
+    const messaging = getMessaging();
+    if (!messaging) {
+      return null;
+    }
+
+    const response = await messaging.unsubscribeFromTopic(fcmTokens, topic);
     console.log('Unsubscribed from topic:', response);
     return response;
   } catch (error) {
