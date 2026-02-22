@@ -58,7 +58,7 @@ const JobsPage: React.FC = () => {
     salaryMax: '',
   });
   const [showFilters, setShowFilters] = useState(false);
-  const [sortBy, setSortBy] = useState('relevance');
+  const [sortBy] = useState('relevance');
 
   useEffect(() => {
     loadJobs();

@@ -52,11 +52,13 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         newSocket.close();
       };
     } else {
-      if (socket) {
-        socket.close();
-        setSocket(null);
-        setIsConnected(false);
-      }
+      setSocket((previousSocket) => {
+        if (previousSocket) {
+          previousSocket.close();
+        }
+        return null;
+      });
+      setIsConnected(false);
     }
   }, [user]);
 

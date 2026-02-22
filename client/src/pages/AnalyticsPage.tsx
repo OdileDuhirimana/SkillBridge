@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ChartBarIcon,
   EyeIcon,
   BriefcaseIcon,
   UserGroupIcon,
   ClockIcon,
-  ArrowTrendingUpIcon,
-  ArrowTrendingDownIcon
+  ArrowTrendingUpIcon
 } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -23,16 +21,6 @@ interface AnalyticsData {
   jobMatchScore: number;
   applicationSuccessRate: number;
   averageResponseTime: number;
-}
-
-interface ChartData {
-  labels: string[];
-  datasets: {
-    label: string;
-    data: number[];
-    backgroundColor: string;
-    borderColor: string;
-  }[];
 }
 
 const AnalyticsPage: React.FC = () => {
@@ -67,21 +55,6 @@ const AnalyticsPage: React.FC = () => {
       setAnalytics(mockAnalytics);
       setLoading(false);
     }, 1000);
-  };
-
-  const getTrendIcon = (value: number, previousValue: number) => {
-    if (value > previousValue) {
-      return <ArrowTrendingUpIcon className="h-4 w-4 text-green-500" />;
-    } else if (value < previousValue) {
-      return <ArrowTrendingDownIcon className="h-4 w-4 text-red-500" />;
-    }
-    return null;
-  };
-
-  const getTrendColor = (value: number, previousValue: number) => {
-    if (value > previousValue) return 'text-green-600';
-    if (value < previousValue) return 'text-red-600';
-    return 'text-gray-600';
   };
 
   if (loading) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { 
   BuildingOfficeIcon,
@@ -37,11 +37,7 @@ const CompanyDetailPage: React.FC = () => {
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadCompany();
-  }, [id]);
-
-  const loadCompany = async () => {
+  const loadCompany = useCallback(async () => {
     setLoading(true);
     
     // Simulate API call
@@ -69,7 +65,11 @@ const CompanyDetailPage: React.FC = () => {
       setCompany(mockCompany);
       setLoading(false);
     }, 1000);
-  };
+  }, [id]);
+
+  useEffect(() => {
+    loadCompany();
+  }, [loadCompany]);
 
   const toggleFollow = () => {
     if (company) {
