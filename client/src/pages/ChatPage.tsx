@@ -7,7 +7,6 @@ import {
   MagnifyingGlassIcon,
   UserGroupIcon
 } from '@heroicons/react/24/outline';
-import { useSocket } from '../context/SocketContext';
 
 interface Message {
   id: string;
@@ -38,7 +37,6 @@ const ChatPage: React.FC = () => {
   const [newMessage, setNewMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { socket } = useSocket();
 
   useEffect(() => {
     loadChats();

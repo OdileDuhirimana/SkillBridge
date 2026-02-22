@@ -41,7 +41,7 @@ const CompaniesPage: React.FC = () => {
     verified: false,
   });
   const [showFilters, setShowFilters] = useState(false);
-  const [sortBy, setSortBy] = useState('rating');
+  const [sortBy] = useState('rating');
 
   useEffect(() => {
     loadCompanies();

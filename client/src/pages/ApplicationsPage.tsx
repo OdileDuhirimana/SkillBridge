@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   BriefcaseIcon,
   ClockIcon,
@@ -29,11 +29,7 @@ const ApplicationsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
 
-  useEffect(() => {
-    loadApplications();
-  }, [filter]);
-
-  const loadApplications = async () => {
+  const loadApplications = useCallback(async () => {
     setLoading(true);
     
     // Simulate API call
@@ -98,7 +94,11 @@ const ApplicationsPage: React.FC = () => {
       setApplications(filteredApplications);
       setLoading(false);
     }, 1000);
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    loadApplications();
+  }, [loadApplications]);
 
   const getStatusColor = (status: string) => {
     switch (status) {

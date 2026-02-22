@@ -9,8 +9,7 @@ import {
   BellIcon,
   EyeIcon,
   ClockIcon,
-  CheckCircleIcon,
-  XCircleIcon
+  CheckCircleIcon
 } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../components/LoadingSpinner';
 

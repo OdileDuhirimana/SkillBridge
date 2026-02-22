@@ -1,16 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { 
   MapPinIcon,
   ClockIcon,
   CurrencyDollarIcon,
-  BriefcaseIcon,
   BuildingOfficeIcon,
-  UserGroupIcon,
   HeartIcon,
   ShareIcon,
-  CheckCircleIcon,
-  XCircleIcon
+  CheckCircleIcon
 } from '@heroicons/react/24/outline';
 import { HeartIcon as HeartSolidIcon } from '@heroicons/react/24/solid';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -60,11 +57,7 @@ const JobDetailPage: React.FC = () => {
   const [applying, setApplying] = useState(false);
   const [showApplicationForm, setShowApplicationForm] = useState(false);
 
-  useEffect(() => {
-    loadJob();
-  }, [id]);
-
-  const loadJob = async () => {
+  const loadJob = useCallback(async () => {
     setLoading(true);
     
     // Simulate API call
@@ -142,7 +135,11 @@ As a senior developer, you will:
       setJob(mockJob);
       setLoading(false);
     }, 1000);
-  };
+  }, [id]);
+
+  useEffect(() => {
+    loadJob();
+  }, [loadJob]);
 
   const handleSaveJob = () => {
     if (job) {
