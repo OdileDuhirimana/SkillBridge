@@ -29,6 +29,12 @@ pids
 coverage/
 *.lcov
 
+# Playwright E2E test artifacts (see playwright.config.js / e2e/)
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # nyc test coverage
 .nyc_output
 

@@ -1,0 +1,167 @@
+name: CI
+
+# Runs on every push and pull request against master (this repository's
+# actual default branch — verified via `git branch -a`) so that regressions
+# are caught before merge, and (via the branch-protection setting configured
+# in the repo, not this file) can gate deployment on this workflow passing.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  server:
+    name: Server (lint, test, coverage)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install server dependencies
+        run: npm ci
+
+      - name: Syntax-check all server source files
+        run: |
+          find server -name "*.js" -not -path "*/node_modules/*" -print0 \
+            | xargs -0 -n1 node --check
+
+      - name: Run server test suite with coverage
+        run: npm run test:coverage
+        env:
+          NODE_ENV: test
+
+  client:
+    name: Client (test, lint via CRA build)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Run client test suite
+        working-directory: client
+        run: npm test -- --watchAll=false
+        env:
+          CI: true
+
+      - name: Build client (CRA runs ESLint as part of the production build)
+        working-directory: client
+        run: npm run build
+        env:
+          CI: true
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+
+    # A real MongoDB the API server connects to for this job — separate
+    # from the server unit-test job's mongodb-memory-server, since these
+    # specs run against `node server/index.js` as an actual process (see
+    # playwright.config.js), not an in-process Supertest app instance.
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install server dependencies
+        run: npm ci
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Build client
+        working-directory: client
+        run: npm run build
+        env:
+          CI: true
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E suite
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # A single required status check that downstream deployment automation
+  # (Vercel/Render git-integration "required checks", or a future explicit
+  # deploy job) can depend on, so deployment is gated on server, client,
+  # AND e2e passing rather than needing to know all job names individually.
+  ci-success:
+    name: CI success
+    needs: [server, client, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All CI checks passed."
+
+  # WHY this is a real workflow step and not just static render.yaml/
+  # vercel.json config: those files describe HOW to deploy, but neither
+  # one is itself an automated trigger wired into this repo's CI — a real
+  # CD step needs to live here, gated on tests actually passing, not just
+  # "whatever Render/Vercel's git integration happens to do on push."
+  # Only runs on a direct push to master (never on a pull request, which
+  # could come from a fork and should never trigger a deploy) and only
+  # after ci-success. See docs/deployment.md's "Continuous Deployment" and
+  # "Environment Separation" sections for what this deploys to (staging,
+  # not production — promotion to production is a deliberate manual step)
+  # and the rollback procedure if a deploy needs to be reverted.
+  deploy:
+    name: Deploy (staging)
+    needs: [ci-success]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render staging deploy hook
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL secret is not set — skipping deploy."
+            echo "This is expected for a portfolio clone with no linked Render service; see docs/deployment.md."
+            exit 0
+          fi
+          echo "Triggering Render staging deploy hook..."
+          curl --fail --silent --show-error -X POST "$RENDER_DEPLOY_HOOK_URL"
+          echo "Deploy hook triggered successfully."
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
