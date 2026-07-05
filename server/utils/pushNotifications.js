@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const logger = require('./logger');
 
 const serviceAccount = {
   projectId: process.env.FIREBASE_PROJECT_ID,
@@ -15,7 +16,7 @@ let firebaseDisabledWarningShown = false;
 
 const warnFirebaseDisabled = () => {
   if (!firebaseDisabledWarningShown) {
-    console.warn('Firebase credentials are missing. Push notifications are disabled.');
+    logger.warn('Firebase credentials are missing. Push notifications are disabled.');
     firebaseDisabledWarningShown = true;
   }
 };
@@ -27,7 +28,7 @@ if (!admin.apps.length && hasFirebaseCredentials) {
       credential: admin.credential.cert(serviceAccount)
     });
   } catch (error) {
-    console.error('Firebase Admin initialization failed. Push notifications are disabled.', error);
+    logger.error('Firebase Admin initialization failed. Push notifications are disabled.', { error: error.message, stack: error.stack });
   }
 } else if (!hasFirebaseCredentials) {
   warnFirebaseDisabled();
@@ -77,10 +78,10 @@ const sendPushNotification = async (fcmToken, notification) => {
     };
 
     const response = await messaging.send(message);
-    console.log('Push notification sent:', response);
+    logger.info('Push notification sent', { response });
     return response;
   } catch (error) {
-    console.error('Push notification error:', error);
+    logger.error('Push notification error', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -120,10 +121,10 @@ const sendBulkPushNotification = async (fcmTokens, notification) => {
     };
 
     const response = await messaging.sendMulticast(message);
-    console.log('Bulk push notification sent:', response);
+    logger.info('Bulk push notification sent', { response });
     return response;
   } catch (error) {
-    console.error('Bulk push notification error:', error);
+    logger.error('Bulk push notification error', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -163,10 +164,10 @@ const sendTopicPushNotification = async (topic, notification) => {
     };
 
     const response = await messaging.send(message);
-    console.log('Topic push notification sent:', response);
+    logger.info('Topic push notification sent', { response });
     return response;
   } catch (error) {
-    console.error('Topic push notification error:', error);
+    logger.error('Topic push notification error', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -180,10 +181,10 @@ const subscribeToTopic = async (fcmTokens, topic) => {
     }
 
     const response = await messaging.subscribeToTopic(fcmTokens, topic);
-    console.log('Subscribed to topic:', response);
+    logger.info('Subscribed to topic', { response, topic });
     return response;
   } catch (error) {
-    console.error('Topic subscription error:', error);
+    logger.error('Topic subscription error', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -197,10 +198,10 @@ const unsubscribeFromTopic = async (fcmTokens, topic) => {
     }
 
     const response = await messaging.unsubscribeFromTopic(fcmTokens, topic);
-    console.log('Unsubscribed from topic:', response);
+    logger.info('Unsubscribed from topic', { response, topic });
     return response;
   } catch (error) {
-    console.error('Topic unsubscription error:', error);
+    logger.error('Topic unsubscription error', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -212,13 +213,13 @@ const sendNotificationToUser = async (userId, notification) => {
     const user = await User.findById(userId).select('fcmToken');
     
     if (!user || !user.fcmToken) {
-      console.log('User not found or no FCM token');
+      logger.debug('User not found or no FCM token', { userId });
       return null;
     }
 
     return await sendPushNotification(user.fcmToken, notification);
   } catch (error) {
-    console.error('Send notification to user error:', error);
+    logger.error('Send notification to user error', { error: error.message, stack: error.stack, userId });
     throw error;
   }
 };
@@ -235,13 +236,13 @@ const sendNotificationToUsers = async (userIds, notification) => {
     const fcmTokens = users.map(user => user.fcmToken);
     
     if (fcmTokens.length === 0) {
-      console.log('No FCM tokens found for users');
+      logger.debug('No FCM tokens found for users', { userIds });
       return null;
     }
 
     return await sendBulkPushNotification(fcmTokens, notification);
   } catch (error) {
-    console.error('Send notification to users error:', error);
+    logger.error('Send notification to users error', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -258,13 +259,13 @@ const sendNotificationToRole = async (role, notification) => {
     const fcmTokens = users.map(user => user.fcmToken);
     
     if (fcmTokens.length === 0) {
-      console.log(`No FCM tokens found for role: ${role}`);
+      logger.debug('No FCM tokens found for role', { role });
       return null;
     }
 
     return await sendBulkPushNotification(fcmTokens, notification);
   } catch (error) {
-    console.error('Send notification to role error:', error);
+    logger.error('Send notification to role error', { error: error.message, stack: error.stack, role });
     throw error;
   }
 };

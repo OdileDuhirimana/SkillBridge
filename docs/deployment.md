@@ -40,3 +40,74 @@ Required env var:
 - `Cloudinary` keys: Cloudinary console > API keys
 - `EMAIL_*`: your SMTP provider settings (Gmail app password, SendGrid SMTP, etc.)
 - `Firebase` service-account values: Firebase console > Project settings > Service accounts
+
+## Environment Separation
+
+Two independent environments, each with its own database, secrets, and
+deploy target — not a single production environment with no staging
+equivalent to test against:
+
+| | Staging | Production |
+|---|---|---|
+| Render service | `skillbridge-api-staging` | `skillbridge-api` |
+| Vercel target | Preview deployments (automatic per-PR) | Production deployment (`main`/`master` branch) |
+| `MONGODB_URI` | Separate Atlas cluster/database (`skillbridge_staging`) | Separate Atlas cluster/database (`skillbridge`) — never shared with staging |
+| `NODE_ENV` | `production` (staging still runs production builds — the point is to test the production build, not `development` mode) | `production` |
+| `SENTRY_DSN` / `REACT_APP_SENTRY_DSN` | A separate Sentry project (or the same project, `environment: staging` tag — set automatically from `NODE_ENV`, see `server/config/sentry.js`) | Production Sentry project |
+| Purpose | Verify a release candidate against production-like infrastructure before promoting | Serves real users |
+
+Promotion flow: merge to `master` → CI (`.github/workflows/ci.yml`) runs →
+on green, the `deploy` job (see "Continuous Deployment" below) triggers
+the **staging** Render deploy hook automatically; promoting staging to
+production is a manual step (Render's "Promote" action, or re-pointing the
+production deploy hook) rather than automatic — a deliberate choice so a
+green CI run alone never silently reaches real users without a human
+decision point, given this project has no smoke-test/canary step yet to
+automate that decision safely.
+
+## Continuous Deployment
+
+`.github/workflows/ci.yml`'s `deploy` job runs after `ci-success` and
+triggers Render's deploy hook via a `curl` call to
+`RENDER_DEPLOY_HOOK_URL` (a GitHub Actions secret). This is a real,
+in-repo CD step — not just static `render.yaml`/`vercel.json` config
+implicitly relying on Render/Vercel's own git integration:
+
+- If `RENDER_DEPLOY_HOOK_URL` is not configured as a repository secret,
+  the job logs that deployment was skipped and exits successfully (`0`) —
+  it never fails CI for a portfolio clone that hasn't configured a real
+  Render service, but it also never pretends to have deployed when it
+  didn't.
+- Vercel's own git integration already redeploys the frontend
+  automatically on push (its native behavior, unrelated to this repo's
+  Actions workflow) — no additional step is needed there.
+
+## Rollback Procedure
+
+If a deploy introduces a regression:
+
+1. **Render (API):** Render retains previous deploys. From the Render
+   dashboard: Service → Events → select the last known-good deploy →
+   "Rollback to this deploy." This reverts the running container without
+   requiring a new git commit/revert first (do the git revert afterward,
+   not instead — a rollback without a corresponding code revert means the
+   next push re-introduces the same regression).
+2. **Vercel (client):** Vercel keeps every deployment addressable by URL.
+   From the Vercel dashboard: Deployments → select the last known-good
+   deployment → "Promote to Production." This is effectively instant
+   (Vercel serves pre-built static assets, no rebuild required).
+3. **Database:** neither of the above touches MongoDB Atlas. If the
+   regression involved a schema migration (`server/migrations/`), run
+   `npm run migrate:down` against the affected environment's
+   `MONGODB_URI` to reverse it — check `migrate:status` first to confirm
+   which migration is actually the most recently applied one before
+   rolling back, since a rollback should undo exactly the migration that
+   shipped with the bad deploy, not an unrelated later one.
+4. **Verify:** hit `GET /api/health` on the rolled-back API (confirms
+   process liveness AND DB connectivity — see `server/app.js`) and spot-
+   check the rolled-back frontend before considering the incident resolved.
+5. **Follow up:** revert the offending commit(s) in git so the next normal
+   deploy doesn't reintroduce the regression, and open a note in the
+   project's issue tracker describing what broke and why the rollback was
+   needed — this project does not yet have a formalized postmortem
+   template (see README's "Future Improvements").

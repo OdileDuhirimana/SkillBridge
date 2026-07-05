@@ -1,5 +1,7 @@
-version: '3.8'
-
+# All secrets below are sourced from a local .env file (see env.example) so no
+# real credential ever needs to be hardcoded in this file. The `:-fallback`
+# defaults exist only so `docker-compose up` works out of the box for local
+# development; override them via `.env` for anything beyond a local sandbox.
 services:
   mongodb:
     image: mongo:7.0
@@ -8,15 +10,27 @@ services:
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password123
-      MONGO_INITDB_DATABASE: skillbridge
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-devpassword}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-skillbridge}
+      # Consumed by server/scripts/init-mongo.js to create the app-scoped
+      # database user. Required (no insecure fallback) — see that file's
+      # comment for why a hardcoded default was removed.
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD must be set in .env}
     volumes:
       - mongodb_data:/data/db
       - ./server/scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
     networks:
       - skillbridge-network
 
+  # WHY Redis is reintroduced here: an earlier draft of this project
+  # referenced "Redis caching" in the README and provisioned this exact
+  # service without ever wiring a query path to it — a real, previously
+  # documented gap (see docs/architecture.md's history). This service is
+  # only reinstated now alongside actual cache-read/cache-invalidation code
+  # in server/utils/cache.js and its callers (jobController.getJobs,
+  # companyController.getCompany) — not ahead of the implementation, to
+  # avoid repeating that exact "claimed but unused" pattern.
   redis:
     image: redis:7-alpine
     container_name: skillbridge-redis
@@ -36,11 +50,12 @@ services:
       - "5000:5000"
     environment:
       NODE_ENV: production
-      MONGODB_URI: mongodb://admin:password123@mongodb:27017/skillbridge?authSource=admin
-      JWT_SECRET: your_super_secret_jwt_key_here
-      JWT_EXPIRE: 7d
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:-devpassword}@mongodb:27017/${MONGO_DATABASE:-skillbridge}?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      JWT_EXPIRE: ${JWT_EXPIRE:-7d}
       PORT: 5000
-      CLIENT_URL: http://localhost:3000
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
     depends_on:
       - mongodb
       - redis

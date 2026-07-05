@@ -6,7 +6,11 @@ import { Toaster } from 'react-hot-toast';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
+import { initClientSentry } from './utils/sentry';
 import './index.css';
+
+// No-op unless REACT_APP_SENTRY_DSN is set — see utils/sentry.ts.
+initClientSentry();
 
 const queryClient = new QueryClient({
   defaultOptions: {

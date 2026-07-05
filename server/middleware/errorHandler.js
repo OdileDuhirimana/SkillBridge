@@ -1,42 +1,66 @@
-const errorHandler = (err, req, res, next) => {
-  let error = { ...err };
-  error.message = err.message;
+const logger = require('../utils/logger');
 
-  // Log error
-  console.error(err);
+/**
+ * Centralized error-handling middleware.
+ *
+ * Standardized response shape (applies to every error path across the API,
+ * including the 4xx "expected" responses controllers build manually):
+ *   { success: false, message: string, errors?: any[] }
+ *
+ * Previously, controllers that caught their own errors returned
+ * `{ success: false, message }` while anything reaching this handler
+ * returned `{ success: false, error }` — two different envelopes for the
+ * same failure class. This handler now emits `message` so API consumers
+ * (including the client's apiService/authService) only ever need to read
+ * one field, regardless of whether the error was thrown or handled locally.
+ */
+const errorHandler = (err, req, res, next) => {
+  let statusCode = err.statusCode || 500;
+  let message = err.message || 'Server Error';
+
+  // Log the original error for observability, tagged with the request id
+  // (see server/middleware/requestId.js) so this line can be correlated
+  // with the rest of that request's log output; the client only ever sees
+  // the sanitized message below.
+  logger.error(err.message || 'Unhandled error', {
+    requestId: req.id,
+    method: req.method,
+    path: req.originalUrl,
+    stack: err.stack
+  });
 
   // Mongoose bad ObjectId
   if (err.name === 'CastError') {
-    const message = 'Resource not found';
-    error = { message, statusCode: 404 };
+    statusCode = 404;
+    message = 'Resource not found';
   }
 
   // Mongoose duplicate key
   if (err.code === 11000) {
-    const message = 'Duplicate field value entered';
-    error = { message, statusCode: 400 };
+    statusCode = 400;
+    message = 'Duplicate field value entered';
   }
 
   // Mongoose validation error
   if (err.name === 'ValidationError') {
-    const message = Object.values(err.errors).map(val => val.message).join(', ');
-    error = { message, statusCode: 400 };
+    statusCode = 400;
+    message = Object.values(err.errors).map((val) => val.message).join(', ');
   }
 
   // JWT errors
   if (err.name === 'JsonWebTokenError') {
-    const message = 'Invalid token';
-    error = { message, statusCode: 401 };
+    statusCode = 401;
+    message = 'Invalid token';
   }
 
   if (err.name === 'TokenExpiredError') {
-    const message = 'Token expired';
-    error = { message, statusCode: 401 };
+    statusCode = 401;
+    message = 'Token expired';
   }
 
-  res.status(error.statusCode || 500).json({
+  res.status(statusCode).json({
     success: false,
-    error: error.message || 'Server Error',
+    message,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 };

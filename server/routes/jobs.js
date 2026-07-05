@@ -15,19 +15,122 @@ const {
 
 const router = express.Router();
 
-// @desc    Get all jobs
-// @route   GET /api/jobs
-// @access  Public
+/**
+ * @swagger
+ * tags:
+ *   name: Jobs
+ *   description: Job listing, search, and management
+ */
+
+/**
+ * @swagger
+ * /jobs:
+ *   get:
+ *     summary: List active jobs with filtering, sorting, and pagination
+ *     tags: [Jobs]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
+ *       - in: query
+ *         name: category
+ *         schema: { type: string }
+ *       - in: query
+ *         name: type
+ *         schema: { type: string }
+ *       - in: query
+ *         name: level
+ *         schema: { type: string }
+ *       - in: query
+ *         name: location
+ *         schema: { type: string }
+ *         description: Free-text match against city/state/country
+ *       - in: query
+ *         name: salaryMin
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: salaryMax
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: A paginated list of active jobs
+ */
 router.get('/', optionalAuth, getJobs);
 
-// @desc    Get single job
-// @route   GET /api/jobs/:id
+// WHY these are registered before `GET /:id`: Express matches routes in
+// registration order, and `/:id` matches any single path segment —
+// including literal segments like `trending` or `categories`. Both were
+// previously registered AFTER `GET /:id`, so `GET /api/jobs/trending` was
+// actually being handled by the `/:id` route with `id = 'trending'`, which
+// fails Mongoose's ObjectId cast and surfaces as an unrelated 404 instead
+// of the trending-jobs list. Same bug class as the one fixed in
+// server/routes/notifications.js and server/routes/companies.js.
+
+// @desc    Get trending jobs
+// @route   GET /api/jobs/trending
 // @access  Public
+router.get('/trending', getTrendingJobs);
+
+// @desc    Get job categories
+// @route   GET /api/jobs/categories
+// @access  Public
+router.get('/categories', getJobCategories);
+
+/**
+ * @swagger
+ * /jobs/{id}:
+ *   get:
+ *     summary: Get a single job by id
+ *     tags: [Jobs]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: The requested job, including whether the current user has already applied
+ *       404:
+ *         description: Job not found
+ */
 router.get('/:id', optionalAuth, getJob);
 
-// @desc    Create job
-// @route   POST /api/jobs
-// @access  Private/Employer
+/**
+ * @swagger
+ * /jobs:
+ *   post:
+ *     summary: Create a new job posting for a company the user owns or manages
+ *     tags: [Jobs]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [title, description, requirements, responsibilities, category, type, level, company]
+ *             properties:
+ *               title: { type: string }
+ *               description: { type: string }
+ *               requirements: { type: string }
+ *               responsibilities: { type: string }
+ *               category: { type: string }
+ *               type: { type: string }
+ *               level: { type: string }
+ *               company: { type: string, description: Company id }
+ *     responses:
+ *       201:
+ *         description: Job created successfully
+ *       403:
+ *         description: Not authorized to post jobs for this company
+ */
 router.post('/', protect, authorize('employer', 'admin'), [
   body('title').trim().notEmpty().withMessage('Job title is required'),
   body('description').trim().notEmpty().withMessage('Job description is required'),
@@ -87,11 +190,6 @@ router.put('/:id', protect, authorize('employer', 'admin'), [
 // @access  Private/Employer
 router.delete('/:id', protect, authorize('employer', 'admin'), deleteJob);
 
-// @desc    Get trending jobs
-// @route   GET /api/jobs/trending
-// @access  Public
-router.get('/trending', getTrendingJobs);
-
 // @desc    Get jobs by company
 // @route   GET /api/jobs/company/:companyId
 // @access  Public
@@ -101,10 +199,5 @@ router.get('/company/:companyId', getJobsByCompany);
 // @route   POST /api/jobs/:id/save
 // @access  Private
 router.post('/:id/save', protect, saveJob);
-
-// @desc    Get job categories
-// @route   GET /api/jobs/categories
-// @access  Public
-router.get('/categories', getJobCategories);
 
 module.exports = router;

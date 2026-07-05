@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const logger = require('../utils/logger');
 
 const protect = async (req, res, next) => {
   let token;
@@ -24,7 +25,11 @@ const protect = async (req, res, next) => {
 
       next();
     } catch (error) {
-      console.error('Auth middleware error:', error);
+      // Debug, not error: an invalid/expired token is routine client
+      // behavior (e.g. a stale token after logout elsewhere), not a server
+      // fault — logging it at 'error' would pollute error-level alerting
+      // with expected 401s.
+      logger.debug('Auth middleware rejected token', { requestId: req.id, error: error.message });
       return res.status(401).json({
         success: false,
         message: 'Not authorized, token failed'

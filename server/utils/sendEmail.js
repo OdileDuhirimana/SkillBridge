@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const logger = require('./logger');
 
 // Create transporter
 const transporter = nodemailer.createTransport({
@@ -162,10 +163,10 @@ const sendEmail = async ({ email, subject, template, data }) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log('Email sent:', info.messageId);
+    logger.info('Email sent', { messageId: info.messageId, template });
     return info;
   } catch (error) {
-    console.error('Email sending error:', error);
+    logger.error('Email sending error', { error: error.message, stack: error.stack, template });
     throw error;
   }
 };
@@ -188,10 +189,10 @@ const sendBulkEmail = async (emails, { subject, template, data }) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log('Bulk email sent:', info.messageId);
+    logger.info('Bulk email sent', { messageId: info.messageId, template, recipientCount: emails.length });
     return info;
   } catch (error) {
-    console.error('Bulk email sending error:', error);
+    logger.error('Bulk email sending error', { error: error.message, stack: error.stack, template });
     throw error;
   }
 };
@@ -200,10 +201,10 @@ const sendBulkEmail = async (emails, { subject, template, data }) => {
 const verifyEmailConfig = async () => {
   try {
     await transporter.verify();
-    console.log('✅ Email configuration verified');
+    logger.info('Email configuration verified');
     return true;
   } catch (error) {
-    console.error('❌ Email configuration error:', error);
+    logger.error('Email configuration error', { error: error.message, stack: error.stack });
     return false;
   }
 };

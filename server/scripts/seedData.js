@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
+const logger = require('../utils/logger');
 const User = require('../models/User');
 const Company = require('../models/Company');
 const Job = require('../models/Job');
@@ -342,9 +343,9 @@ const sampleJobs = [
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/skillbridge');
-    console.log('✅ MongoDB connected successfully');
+    logger.info('MongoDB connected successfully');
   } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
+    logger.error('MongoDB connection error', { error: error.message, stack: error.stack });
     process.exit(1);
   }
 };
@@ -358,10 +359,10 @@ const seedUsers = async () => {
       await user.save();
     }
     
-    console.log('✅ Users seeded successfully');
+    logger.info('Users seeded successfully');
     return await User.find({});
   } catch (error) {
-    console.error('❌ Error seeding users:', error);
+    logger.error('Error seeding users', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -382,10 +383,10 @@ const seedCompanies = async (users) => {
       await company.save();
     }
     
-    console.log('✅ Companies seeded successfully');
+    logger.info('Companies seeded successfully');
     return await Company.find({});
   } catch (error) {
-    console.error('❌ Error seeding companies:', error);
+    logger.error('Error seeding companies', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -416,10 +417,10 @@ const seedJobs = async (companies) => {
       await job.save();
     }
     
-    console.log('✅ Jobs seeded successfully');
+    logger.info('Jobs seeded successfully');
     return await Job.find({});
   } catch (error) {
-    console.error('❌ Error seeding jobs:', error);
+    logger.error('Error seeding jobs', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -455,10 +456,10 @@ const seedApplications = async (users, jobs) => {
       await application.save();
     }
     
-    console.log('✅ Applications seeded successfully');
+    logger.info('Applications seeded successfully');
     return await Application.find({});
   } catch (error) {
-    console.error('❌ Error seeding applications:', error);
+    logger.error('Error seeding applications', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -510,10 +511,10 @@ const seedChats = async (users, applications) => {
       await chat.save();
     }
     
-    console.log('✅ Chats seeded successfully');
+    logger.info('Chats seeded successfully');
     return await Chat.find({});
   } catch (error) {
-    console.error('❌ Error seeding chats:', error);
+    logger.error('Error seeding chats', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -558,33 +559,39 @@ const seedNotifications = async (users) => {
       }
     }
     
-    console.log('✅ Notifications seeded successfully');
+    logger.info('Notifications seeded successfully');
     return await Notification.find({});
   } catch (error) {
-    console.error('❌ Error seeding notifications:', error);
+    logger.error('Error seeding notifications', { error: error.message, stack: error.stack });
     throw error;
   }
 };
 
 const seedDatabase = async () => {
   try {
-    console.log('🌱 Starting database seeding...');
-    
+    logger.info('Starting database seeding...');
+
     await connectDB();
-    
+
     const users = await seedUsers();
     const companies = await seedCompanies(users);
     const jobs = await seedJobs(companies);
     const applications = await seedApplications(users, jobs);
     const chats = await seedChats(users, applications);
     const notifications = await seedNotifications(users);
-    
-    console.log('✅ Database seeding completed successfully!');
-    console.log(`📊 Seeded ${users.length} users, ${companies.length} companies, ${jobs.length} jobs, ${applications.length} applications, ${chats.length} chats, ${notifications.length} notifications`);
-    
+
+    logger.info('Database seeding completed successfully!', {
+      users: users.length,
+      companies: companies.length,
+      jobs: jobs.length,
+      applications: applications.length,
+      chats: chats.length,
+      notifications: notifications.length
+    });
+
     process.exit(0);
   } catch (error) {
-    console.error('❌ Database seeding failed:', error);
+    logger.error('Database seeding failed', { error: error.message, stack: error.stack });
     process.exit(1);
   }
 };
