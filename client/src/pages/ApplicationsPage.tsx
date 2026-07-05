@@ -1,146 +1,105 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
+import { Link } from 'react-router-dom';
+import {
   BriefcaseIcon,
   ClockIcon,
   CheckCircleIcon,
   XCircleIcon,
   EyeIcon,
-  CalendarIcon
+  CalendarIcon,
 } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorState from '../components/ErrorState';
+import { applicationService } from '../services/applicationService';
+import { Application, ApplicationStatus } from '../types';
+import { formatDate } from '../utils/formatters';
 
-interface Application {
-  id: string;
-  job: {
-    id: string;
-    title: string;
-    company: string;
-    location: string;
-  };
-  status: 'pending' | 'reviewed' | 'interview' | 'rejected' | 'accepted';
-  appliedAt: string;
-  lastUpdated: string;
-  interviewDate?: string;
-  notes?: string;
-}
+type FilterValue = 'all' | ApplicationStatus;
+
+const FILTERS: { id: FilterValue; label: string }[] = [
+  { id: 'all', label: 'All Applications' },
+  { id: 'applied', label: 'Applied' },
+  { id: 'under-review', label: 'Under Review' },
+  { id: 'interview-scheduled', label: 'Interview' },
+  { id: 'offer-accepted', label: 'Accepted' },
+  { id: 'rejected', label: 'Rejected' },
+];
 
 const ApplicationsPage: React.FC = () => {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterValue>('all');
 
   const loadApplications = useCallback(async () => {
     setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const mockApplications: Application[] = [
-        {
-          id: '1',
-          job: {
-            id: '1',
-            title: 'Senior React Developer',
-            company: 'TechCorp',
-            location: 'San Francisco, CA',
-          },
-          status: 'interview',
-          appliedAt: '2024-01-15',
-          lastUpdated: '2024-01-20',
-          interviewDate: '2024-01-25',
-          notes: 'Interview scheduled for next week',
-        },
-        {
-          id: '2',
-          job: {
-            id: '2',
-            title: 'Full Stack Engineer',
-            company: 'DataFlow Inc.',
-            location: 'Remote',
-          },
-          status: 'reviewed',
-          appliedAt: '2024-01-10',
-          lastUpdated: '2024-01-18',
-        },
-        {
-          id: '3',
-          job: {
-            id: '3',
-            title: 'Frontend Developer',
-            company: 'StartupXYZ',
-            location: 'New York, NY',
-          },
-          status: 'rejected',
-          appliedAt: '2024-01-05',
-          lastUpdated: '2024-01-12',
-        },
-        {
-          id: '4',
-          job: {
-            id: '4',
-            title: 'Product Manager',
-            company: 'DesignStudio',
-            location: 'Los Angeles, CA',
-          },
-          status: 'pending',
-          appliedAt: '2024-01-22',
-          lastUpdated: '2024-01-22',
-        },
-      ];
+    setError(null);
 
-      const filteredApplications = filter === 'all' 
-        ? mockApplications 
-        : mockApplications.filter(app => app.status === filter);
-
-      setApplications(filteredApplications);
+    try {
+      const response = await applicationService.getApplications({
+        status: filter === 'all' ? undefined : filter,
+      });
+      setApplications(response.data);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load applications. Please try again.');
+      setApplications([]);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   }, [filter]);
 
   useEffect(() => {
     loadApplications();
   }, [loadApplications]);
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: ApplicationStatus) => {
     switch (status) {
-      case 'pending':
+      case 'applied':
         return 'text-yellow-600 bg-yellow-100';
-      case 'reviewed':
+      case 'under-review':
         return 'text-blue-600 bg-blue-100';
-      case 'interview':
+      case 'shortlisted':
+      case 'interview-scheduled':
+      case 'interview-completed':
         return 'text-purple-600 bg-purple-100';
-      case 'accepted':
+      case 'offer-extended':
+      case 'offer-accepted':
         return 'text-green-600 bg-green-100';
       case 'rejected':
+      case 'offer-declined':
+      case 'withdrawn':
         return 'text-red-600 bg-red-100';
       default:
         return 'text-gray-600 bg-gray-100';
     }
   };
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = (status: ApplicationStatus) => {
     switch (status) {
-      case 'pending':
-        return <ClockIcon className="h-5 w-5" />;
-      case 'reviewed':
-        return <EyeIcon className="h-5 w-5" />;
-      case 'interview':
-        return <CalendarIcon className="h-5 w-5" />;
-      case 'accepted':
-        return <CheckCircleIcon className="h-5 w-5" />;
+      case 'applied':
+        return <ClockIcon className="h-5 w-5" aria-hidden="true" />;
+      case 'under-review':
+        return <EyeIcon className="h-5 w-5" aria-hidden="true" />;
+      case 'shortlisted':
+      case 'interview-scheduled':
+      case 'interview-completed':
+        return <CalendarIcon className="h-5 w-5" aria-hidden="true" />;
+      case 'offer-extended':
+      case 'offer-accepted':
+        return <CheckCircleIcon className="h-5 w-5" aria-hidden="true" />;
       case 'rejected':
-        return <XCircleIcon className="h-5 w-5" />;
+      case 'offer-declined':
+      case 'withdrawn':
+        return <XCircleIcon className="h-5 w-5" aria-hidden="true" />;
       default:
-        return <ClockIcon className="h-5 w-5" />;
+        return <ClockIcon className="h-5 w-5" aria-hidden="true" />;
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
+  const statusCounts = applications.reduce<Record<string, number>>((acc, app) => {
+    acc[app.status] = (acc[app.status] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <div className="space-y-6">
@@ -155,66 +114,20 @@ const ApplicationsPage: React.FC = () => {
       {/* Filters */}
       <div className="bg-white shadow rounded-lg p-6">
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setFilter('all')}
-            className={`px-4 py-2 rounded-md text-sm font-medium ${
-              filter === 'all'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            All Applications
-          </button>
-          <button
-            onClick={() => setFilter('pending')}
-            className={`px-4 py-2 rounded-md text-sm font-medium ${
-              filter === 'pending'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Pending
-          </button>
-          <button
-            onClick={() => setFilter('reviewed')}
-            className={`px-4 py-2 rounded-md text-sm font-medium ${
-              filter === 'reviewed'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Under Review
-          </button>
-          <button
-            onClick={() => setFilter('interview')}
-            className={`px-4 py-2 rounded-md text-sm font-medium ${
-              filter === 'interview'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Interview
-          </button>
-          <button
-            onClick={() => setFilter('accepted')}
-            className={`px-4 py-2 rounded-md text-sm font-medium ${
-              filter === 'accepted'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Accepted
-          </button>
-          <button
-            onClick={() => setFilter('rejected')}
-            className={`px-4 py-2 rounded-md text-sm font-medium ${
-              filter === 'rejected'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Rejected
-          </button>
+          {FILTERS.map((option) => (
+            <button
+              key={option.id}
+              onClick={() => setFilter(option.id)}
+              aria-pressed={filter === option.id}
+              className={`px-4 py-2 rounded-md text-sm font-medium ${
+                filter === option.id
+                  ? 'bg-blue-100 text-blue-700'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -224,15 +137,16 @@ const ApplicationsPage: React.FC = () => {
           <div className="flex items-center justify-center h-64">
             <LoadingSpinner />
           </div>
+        ) : error ? (
+          <ErrorState message={error} onRetry={loadApplications} />
         ) : applications.length === 0 ? (
-          <div className="text-center py-12">
-            <BriefcaseIcon className="mx-auto h-12 w-12 text-gray-400" />
+          <div className="text-center py-12 bg-white shadow rounded-lg">
+            <BriefcaseIcon className="mx-auto h-12 w-12 text-gray-400" aria-hidden="true" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No applications found</h3>
             <p className="mt-1 text-sm text-gray-500">
-              {filter === 'all' 
+              {filter === 'all'
                 ? "You haven't applied to any jobs yet."
-                : `No applications with status "${filter}" found.`
-              }
+                : `No applications with status "${filter}" found.`}
             </p>
           </div>
         ) : (
@@ -242,50 +156,42 @@ const ApplicationsPage: React.FC = () => {
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
                     <h3 className="text-lg font-semibold text-gray-900">
-                      {application.job.title}
+                      {application.job?.title || 'Job no longer available'}
                     </h3>
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(application.status)}`}>
                       {getStatusIcon(application.status)}
-                      <span className="ml-1 capitalize">{application.status}</span>
+                      <span className="ml-1 capitalize">{application.status.replace(/-/g, ' ')}</span>
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-4 text-sm text-gray-600 mb-3">
+                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
                     <div className="flex items-center">
-                      <BriefcaseIcon className="h-4 w-4 mr-1" />
-                      {application.job.company}
-                    </div>
-                    <div className="flex items-center">
-                      <ClockIcon className="h-4 w-4 mr-1" />
-                      {application.job.location}
+                      <BriefcaseIcon className="h-4 w-4 mr-1" aria-hidden="true" />
+                      {application.company?.name || 'Unknown company'}
                     </div>
                   </div>
 
                   <div className="text-sm text-gray-500 mb-3">
-                    Applied on {formatDate(application.appliedAt)}
-                    {application.lastUpdated !== application.appliedAt && (
-                      <span className="ml-2">
-                        • Last updated {formatDate(application.lastUpdated)}
-                      </span>
-                    )}
+                    Applied on {formatDate(application.createdAt)}
                   </div>
 
-                  {application.interviewDate && (
+                  {application.interview?.scheduledDate && (
                     <div className="flex items-center text-sm text-purple-600 mb-2">
-                      <CalendarIcon className="h-4 w-4 mr-1" />
-                      Interview scheduled for {formatDate(application.interviewDate)}
+                      <CalendarIcon className="h-4 w-4 mr-1" aria-hidden="true" />
+                      Interview scheduled for {formatDate(application.interview.scheduledDate)}
                     </div>
-                  )}
-
-                  {application.notes && (
-                    <p className="text-sm text-gray-600">{application.notes}</p>
                   )}
                 </div>
 
                 <div className="flex items-center gap-2 ml-4">
-                  <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium">
-                    View Job
-                  </button>
+                  {application.job && (
+                    <Link
+                      to={`/jobs/${application.job.id}`}
+                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium"
+                    >
+                      View Job
+                    </Link>
+                  )}
                 </div>
               </div>
             </div>
@@ -294,31 +200,31 @@ const ApplicationsPage: React.FC = () => {
       </div>
 
       {/* Stats */}
-      {!loading && applications.length > 0 && (
+      {!loading && !error && applications.length > 0 && (
         <div className="bg-white shadow rounded-lg p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Application Statistics</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-600">
-                {applications.filter(app => app.status === 'pending').length}
+                {statusCounts['applied'] || 0}
               </div>
-              <div className="text-sm text-gray-600">Pending</div>
+              <div className="text-sm text-gray-600">Applied</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-600">
-                {applications.filter(app => app.status === 'reviewed').length}
+                {statusCounts['under-review'] || 0}
               </div>
               <div className="text-sm text-gray-600">Under Review</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-purple-600">
-                {applications.filter(app => app.status === 'interview').length}
+                {statusCounts['interview-scheduled'] || 0}
               </div>
               <div className="text-sm text-gray-600">Interviews</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-green-600">
-                {applications.filter(app => app.status === 'accepted').length}
+                {statusCounts['offer-accepted'] || 0}
               </div>
               <div className="text-sm text-gray-600">Accepted</div>
             </div>

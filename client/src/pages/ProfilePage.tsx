@@ -1,121 +1,53 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { 
+import {
   UserIcon,
   PencilIcon,
   PlusIcon,
   XMarkIcon,
-  CheckIcon
+  CheckIcon,
 } from '@heroicons/react/24/outline';
-import LoadingSpinner from '../components/LoadingSpinner';
+import toast from 'react-hot-toast';
+import { userService } from '../services/userService';
+import { Skill } from '../types';
 
-interface Skill {
-  id: string;
-  name: string;
-  level: 'beginner' | 'intermediate' | 'advanced' | 'expert';
-}
-
-interface Experience {
-  id: string;
-  title: string;
-  company: string;
-  location: string;
-  startDate: string;
-  endDate?: string;
-  current: boolean;
-  description: string;
-}
-
-interface Education {
-  id: string;
-  degree: string;
-  school: string;
-  field: string;
-  startDate: string;
-  endDate?: string;
-  current: boolean;
-}
+const SKILL_LEVELS: Skill['level'][] = ['beginner', 'intermediate', 'advanced', 'expert'];
 
 const ProfilePage: React.FC = () => {
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const { user, updateUser } = useAuth();
   const [editing, setEditing] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [experience, setExperience] = useState<Experience[]>([]);
-  const [education, setEducation] = useState<Education[]>([]);
-  const [newSkill, setNewSkill] = useState({ name: '', level: 'beginner' as const });
+  const [newSkill, setNewSkill] = useState<{ name: string; level: Skill['level'] }>({ name: '', level: 'beginner' });
   const [showAddSkill, setShowAddSkill] = useState(false);
+  const [savingSkill, setSavingSkill] = useState(false);
 
-  useEffect(() => {
-    loadProfileData();
-  }, []);
+  const handleAddSkill = async () => {
+    if (!user || !newSkill.name.trim()) return;
 
-  const loadProfileData = async () => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setSkills([
-        { id: '1', name: 'React', level: 'expert' },
-        { id: '2', name: 'TypeScript', level: 'advanced' },
-        { id: '3', name: 'Node.js', level: 'intermediate' },
-        { id: '4', name: 'Python', level: 'beginner' },
-      ]);
-
-      setExperience([
-        {
-          id: '1',
-          title: 'Senior Frontend Developer',
-          company: 'TechCorp',
-          location: 'San Francisco, CA',
-          startDate: '2022-01-01',
-          current: true,
-          description: 'Led frontend development for multiple products using React and TypeScript.',
-        },
-        {
-          id: '2',
-          title: 'Frontend Developer',
-          company: 'StartupXYZ',
-          location: 'New York, NY',
-          startDate: '2020-06-01',
-          endDate: '2021-12-31',
-          current: false,
-          description: 'Developed user interfaces for web applications using React and Redux.',
-        },
-      ]);
-
-      setEducation([
-        {
-          id: '1',
-          degree: 'Bachelor of Science',
-          school: 'University of California',
-          field: 'Computer Science',
-          startDate: '2016-09-01',
-          endDate: '2020-05-31',
-          current: false,
-        },
-      ]);
-
-      setLoading(false);
-    }, 1000);
-  };
-
-  const handleAddSkill = () => {
-    if (newSkill.name.trim()) {
-      const skill: Skill = {
-        id: Date.now().toString(),
-        name: newSkill.name,
-        level: newSkill.level,
-      };
-      setSkills(prev => [...prev, skill]);
+    setSavingSkill(true);
+    try {
+      const skills = await userService.addSkill(user.id, newSkill.name.trim(), newSkill.level);
+      updateUser({ skills });
       setNewSkill({ name: '', level: 'beginner' });
       setShowAddSkill(false);
+      toast.success('Skill added');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to add skill');
+    } finally {
+      setSavingSkill(false);
     }
   };
 
-  const handleRemoveSkill = (skillId: string) => {
-    setSkills(prev => prev.filter(skill => skill.id !== skillId));
+  const handleRemoveSkill = async (skillId?: string) => {
+    if (!user || !skillId) return;
+
+    try {
+      const skills = await userService.deleteSkill(user.id, skillId);
+      updateUser({ skills });
+      toast.success('Skill removed');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove skill');
+    }
   };
 
   const getLevelColor = (level: string) => {
@@ -133,13 +65,13 @@ const ProfilePage: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <LoadingSpinner />
-      </div>
-    );
+  if (!user) {
+    return null;
   }
+
+  const skills = user.skills || [];
+  const experience = user.experience || [];
+  const education = user.education || [];
 
   return (
     <div className="space-y-6">
@@ -148,15 +80,15 @@ const ProfilePage: React.FC = () => {
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
             <div className="h-20 w-20 bg-gray-200 rounded-full flex items-center justify-center">
-              <UserIcon className="h-10 w-10 text-gray-400" />
+              <UserIcon className="h-10 w-10 text-gray-400" aria-hidden="true" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                {user?.firstName} {user?.lastName}
+                {user.firstName} {user.lastName}
               </h1>
-              <p className="text-gray-600">{user?.email}</p>
+              <p className="text-gray-600">{user.email}</p>
               <p className="text-sm text-gray-500">
-                {user?.role === 'student' ? 'Job Seeker' : 'Employer'}
+                {user.role === 'student' ? 'Job Seeker' : 'Employer'}
               </p>
             </div>
           </div>
@@ -164,8 +96,8 @@ const ProfilePage: React.FC = () => {
             onClick={() => setEditing(!editing)}
             className="flex items-center px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
           >
-            <PencilIcon className="h-4 w-4 mr-2" />
-            {editing ? 'Cancel' : 'Edit Profile'}
+            <PencilIcon className="h-4 w-4 mr-2" aria-hidden="true" />
+            {editing ? 'Done Editing' : 'Edit Profile'}
           </button>
         </div>
       </div>
@@ -173,7 +105,7 @@ const ProfilePage: React.FC = () => {
       {/* Tabs */}
       <div className="bg-white shadow rounded-lg">
         <div className="border-b border-gray-200">
-          <nav className="-mb-px flex space-x-8 px-6">
+          <nav className="-mb-px flex space-x-8 px-6" aria-label="Profile sections">
             {[
               { id: 'overview', name: 'Overview' },
               { id: 'experience', name: 'Experience' },
@@ -183,6 +115,7 @@ const ProfilePage: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                aria-current={activeTab === tab.id ? 'page' : undefined}
                 className={`py-4 px-1 border-b-2 font-medium text-sm ${
                   activeTab === tab.id
                     ? 'border-blue-500 text-blue-600'
@@ -201,19 +134,19 @@ const ProfilePage: React.FC = () => {
               <div>
                 <h3 className="text-lg font-medium text-gray-900 mb-2">About</h3>
                 <p className="text-gray-600">
-                  {user?.bio || 'No bio available. Add a bio to tell others about yourself.'}
+                  {user.bio || 'No bio available. Add a bio to tell others about yourself.'}
                 </p>
               </div>
               <div>
                 <h3 className="text-lg font-medium text-gray-900 mb-2">Location</h3>
-                <p className="text-gray-600">{user?.location || 'No location specified'}</p>
+                <p className="text-gray-600">{user.location || 'No location specified'}</p>
               </div>
               <div>
                 <h3 className="text-lg font-medium text-gray-900 mb-2">Contact</h3>
                 <div className="space-y-1">
-                  <p className="text-gray-600">Email: {user?.email}</p>
-                  {user?.phone && <p className="text-gray-600">Phone: {user.phone}</p>}
-                  {user?.website && <p className="text-gray-600">Website: {user.website}</p>}
+                  <p className="text-gray-600">Email: {user.email}</p>
+                  {user.phone && <p className="text-gray-600">Phone: {user.phone}</p>}
+                  {user.website && <p className="text-gray-600">Website: {user.website}</p>}
                 </div>
               </div>
             </div>
@@ -221,70 +154,44 @@ const ProfilePage: React.FC = () => {
 
           {activeTab === 'experience' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-medium text-gray-900">Work Experience</h3>
-                {editing && (
-                  <button className="flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50">
-                    <PlusIcon className="h-4 w-4 mr-2" />
-                    Add Experience
-                  </button>
-                )}
-              </div>
-              {experience.map((exp) => (
-                <div key={exp.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h4 className="font-medium text-gray-900">{exp.title}</h4>
-                      <p className="text-gray-600">{exp.company}</p>
-                      <p className="text-sm text-gray-500">{exp.location}</p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(exp.startDate).toLocaleDateString()} -{' '}
-                        {exp.current ? 'Present' : new Date(exp.endDate!).toLocaleDateString()}
-                      </p>
-                      <p className="text-gray-600 mt-2">{exp.description}</p>
-                    </div>
-                    {editing && (
-                      <button className="text-red-600 hover:text-red-500">
-                        <XMarkIcon className="h-4 w-4" />
-                      </button>
-                    )}
+              <h3 className="text-lg font-medium text-gray-900">Work Experience</h3>
+              {experience.length === 0 ? (
+                <p className="text-sm text-gray-500">No work experience added yet.</p>
+              ) : (
+                experience.map((exp, index) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4">
+                    <h4 className="font-medium text-gray-900">{exp.title}</h4>
+                    <p className="text-gray-600">{exp.company}</p>
+                    <p className="text-sm text-gray-500">{exp.location}</p>
+                    <p className="text-sm text-gray-500">
+                      {new Date(exp.startDate).toLocaleDateString()} -{' '}
+                      {exp.current || !exp.endDate ? 'Present' : new Date(exp.endDate).toLocaleDateString()}
+                    </p>
+                    {exp.description && <p className="text-gray-600 mt-2">{exp.description}</p>}
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           )}
 
           {activeTab === 'education' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-medium text-gray-900">Education</h3>
-                {editing && (
-                  <button className="flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50">
-                    <PlusIcon className="h-4 w-4 mr-2" />
-                    Add Education
-                  </button>
-                )}
-              </div>
-              {education.map((edu) => (
-                <div key={edu.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h4 className="font-medium text-gray-900">{edu.degree}</h4>
-                      <p className="text-gray-600">{edu.school}</p>
-                      <p className="text-sm text-gray-500">{edu.field}</p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(edu.startDate).toLocaleDateString()} -{' '}
-                        {edu.current ? 'Present' : new Date(edu.endDate!).toLocaleDateString()}
-                      </p>
-                    </div>
-                    {editing && (
-                      <button className="text-red-600 hover:text-red-500">
-                        <XMarkIcon className="h-4 w-4" />
-                      </button>
-                    )}
+              <h3 className="text-lg font-medium text-gray-900">Education</h3>
+              {education.length === 0 ? (
+                <p className="text-sm text-gray-500">No education history added yet.</p>
+              ) : (
+                education.map((edu, index) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4">
+                    <h4 className="font-medium text-gray-900">{edu.degree}</h4>
+                    <p className="text-gray-600">{edu.institution}</p>
+                    <p className="text-sm text-gray-500">{edu.field}</p>
+                    <p className="text-sm text-gray-500">
+                      {new Date(edu.startDate).toLocaleDateString()} -{' '}
+                      {edu.current || !edu.endDate ? 'Present' : new Date(edu.endDate).toLocaleDateString()}
+                    </p>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           )}
 
@@ -297,7 +204,7 @@ const ProfilePage: React.FC = () => {
                     onClick={() => setShowAddSkill(true)}
                     className="flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
                   >
-                    <PlusIcon className="h-4 w-4 mr-2" />
+                    <PlusIcon className="h-4 w-4 mr-2" aria-hidden="true" />
                     Add Skill
                   </button>
                 )}
@@ -307,10 +214,11 @@ const ProfilePage: React.FC = () => {
                 <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label htmlFor="new-skill-name" className="block text-sm font-medium text-gray-700 mb-1">
                         Skill Name
                       </label>
                       <input
+                        id="new-skill-name"
                         type="text"
                         className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                         value={newSkill.name}
@@ -319,27 +227,30 @@ const ProfilePage: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label htmlFor="new-skill-level" className="block text-sm font-medium text-gray-700 mb-1">
                         Level
                       </label>
                       <select
+                        id="new-skill-level"
                         className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                         value={newSkill.level}
-                        onChange={(e) => setNewSkill(prev => ({ ...prev, level: e.target.value as any }))}
+                        onChange={(e) => setNewSkill(prev => ({ ...prev, level: e.target.value as Skill['level'] }))}
                       >
-                        <option value="beginner">Beginner</option>
-                        <option value="intermediate">Intermediate</option>
-                        <option value="advanced">Advanced</option>
-                        <option value="expert">Expert</option>
+                        {SKILL_LEVELS.map((level) => (
+                          <option key={level} value={level}>
+                            {level.charAt(0).toUpperCase() + level.slice(1)}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handleAddSkill}
-                        className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                        disabled={savingSkill || !newSkill.name.trim()}
+                        className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <CheckIcon className="h-4 w-4 mr-2" />
-                        Add
+                        <CheckIcon className="h-4 w-4 mr-2" aria-hidden="true" />
+                        {savingSkill ? 'Adding...' : 'Add'}
                       </button>
                       <button
                         onClick={() => setShowAddSkill(false)}
@@ -352,27 +263,32 @@ const ProfilePage: React.FC = () => {
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-2">
-                {skills.map((skill) => (
-                  <div
-                    key={skill.id}
-                    className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800"
-                  >
-                    <span>{skill.name}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs ${getLevelColor(skill.level)}`}>
-                      {skill.level}
-                    </span>
-                    {editing && (
-                      <button
-                        onClick={() => handleRemoveSkill(skill.id)}
-                        className="text-red-600 hover:text-red-500"
-                      >
-                        <XMarkIcon className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
+              {skills.length === 0 ? (
+                <p className="text-sm text-gray-500">No skills added yet.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {skills.map((skill) => (
+                    <div
+                      key={skill._id || skill.name}
+                      className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800"
+                    >
+                      <span>{skill.name}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs ${getLevelColor(skill.level)}`}>
+                        {skill.level}
+                      </span>
+                      {editing && (
+                        <button
+                          onClick={() => handleRemoveSkill(skill._id)}
+                          aria-label={`Remove skill ${skill.name}`}
+                          className="text-red-600 hover:text-red-500"
+                        >
+                          <XMarkIcon className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

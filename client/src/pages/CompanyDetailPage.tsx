@@ -1,102 +1,53 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { 
+import {
   BuildingOfficeIcon,
   MapPinIcon,
   UserGroupIcon,
-  StarIcon,
-  HeartIcon,
   BriefcaseIcon,
-  ShareIcon
 } from '@heroicons/react/24/outline';
-import { HeartIcon as HeartSolidIcon, StarIcon as StarSolidIcon } from '@heroicons/react/24/solid';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorState from '../components/ErrorState';
+import { companyService } from '../services/companyService';
+import { jobService } from '../services/jobService';
+import { Company, Job } from '../types';
+import { renderStars } from '../utils/renderStars';
+import { formatSalary } from '../utils/formatters';
 
-interface Company {
-  id: string;
-  name: string;
-  logo: string;
-  industry: string;
-  size: string;
-  location: string;
-  description: string;
-  rating: number;
-  reviewCount: number;
-  isVerified: boolean;
-  isFollowing: boolean;
-  jobsCount: number;
-  benefits: string[];
-  culture: string[];
-  website: string;
-  founded: number;
-  headquarters: string;
-}
+// This page renders ratings at a larger size (h-5 w-5) than the compact
+// list view in CompaniesPage.tsx (which uses the shared default h-4 w-4).
+const RATING_ICON_SIZE = 'h-5 w-5';
 
 const CompanyDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [company, setCompany] = useState<Company | null>(null);
+  const [recentJobs, setRecentJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const loadCompany = useCallback(async () => {
+    if (!id) return;
     setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const mockCompany: Company = {
-        id: id || '1',
-        name: 'TechCorp',
-        logo: '',
-        industry: 'Technology',
-        size: '201-500',
-        location: 'San Francisco, CA',
-        description: 'TechCorp is a leading technology company focused on innovation and growth. We build cutting-edge software solutions that help businesses transform their operations and achieve their goals. Our team of talented engineers, designers, and product managers work together to create products that make a real difference in the world.',
-        rating: 4.5,
-        reviewCount: 128,
-        isVerified: true,
-        isFollowing: false,
-        jobsCount: 15,
-        benefits: ['Health Insurance', '401k', 'Flexible Hours', 'Remote Work', 'Stock Options', 'Learning Budget'],
-        culture: ['Innovative', 'Collaborative', 'Fast-paced', 'Inclusive', 'Growth-oriented'],
-        website: 'https://techcorp.com',
-        founded: 2015,
-        headquarters: 'San Francisco, CA',
-      };
+    setError(null);
 
-      setCompany(mockCompany);
+    try {
+      const [companyData, jobsResponse] = await Promise.all([
+        companyService.getCompany(id),
+        jobService.getJobsByCompany(id, 1, 3),
+      ]);
+      setCompany(companyData);
+      setRecentJobs(jobsResponse.data);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load this company. Please try again.');
+      setCompany(null);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   }, [id]);
 
   useEffect(() => {
     loadCompany();
   }, [loadCompany]);
-
-  const toggleFollow = () => {
-    if (company) {
-      setCompany(prev => prev ? { ...prev, isFollowing: !prev.isFollowing } : null);
-    }
-  };
-
-  const renderStars = (rating: number) => {
-    const stars = [];
-    const fullStars = Math.floor(rating);
-    const hasHalfStar = rating % 1 !== 0;
-
-    for (let i = 0; i < fullStars; i++) {
-      stars.push(<StarSolidIcon key={i} className="h-5 w-5 text-yellow-400" />);
-    }
-
-    if (hasHalfStar) {
-      stars.push(<StarIcon key="half" className="h-5 w-5 text-yellow-400" />);
-    }
-
-    const remainingStars = 5 - Math.ceil(rating);
-    for (let i = 0; i < remainingStars; i++) {
-      stars.push(<StarIcon key={`empty-${i}`} className="h-5 w-5 text-gray-300" />);
-    }
-
-    return stars;
-  };
 
   if (loading) {
     return (
@@ -104,6 +55,10 @@ const CompanyDetailPage: React.FC = () => {
         <LoadingSpinner />
       </div>
     );
+  }
+
+  if (error) {
+    return <ErrorState message={error} onRetry={loadCompany} />;
   }
 
   if (!company) {
@@ -126,7 +81,7 @@ const CompanyDetailPage: React.FC = () => {
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-4">
               <div className="h-16 w-16 bg-gray-200 rounded-lg flex items-center justify-center">
-                <BuildingOfficeIcon className="h-8 w-8 text-gray-400" />
+                <BuildingOfficeIcon className="h-8 w-8 text-gray-400" aria-hidden="true" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -137,18 +92,18 @@ const CompanyDetailPage: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-4 text-sm text-gray-600 mt-2">
+                <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mt-2">
                   <div className="flex items-center">
-                    <MapPinIcon className="h-4 w-4 mr-1" />
-                    {company.location}
+                    <MapPinIcon className="h-4 w-4 mr-1" aria-hidden="true" />
+                    {company.headquarters?.city || 'Not specified'}
                   </div>
                   <div className="flex items-center">
-                    <UserGroupIcon className="h-4 w-4 mr-1" />
+                    <UserGroupIcon className="h-4 w-4 mr-1" aria-hidden="true" />
                     {company.size} employees
                   </div>
                   <div className="flex items-center">
-                    <BriefcaseIcon className="h-4 w-4 mr-1" />
-                    {company.jobsCount} jobs
+                    <BriefcaseIcon className="h-4 w-4 mr-1" aria-hidden="true" />
+                    {company.stats?.activeJobs ?? 0} jobs
                   </div>
                 </div>
               </div>
@@ -157,10 +112,10 @@ const CompanyDetailPage: React.FC = () => {
             <div className="flex items-center gap-4 mb-4">
               <div className="flex items-center">
                 <div className="flex items-center">
-                  {renderStars(company.rating)}
+                  {renderStars(company.averageRating || 0, RATING_ICON_SIZE)}
                 </div>
                 <span className="ml-2 text-sm text-gray-600">
-                  {company.rating} ({company.reviewCount} reviews)
+                  {company.averageRating || 0} ({company.totalReviews || 0} reviews)
                 </span>
               </div>
               <span className="text-sm text-gray-500">{company.industry}</span>
@@ -169,32 +124,18 @@ const CompanyDetailPage: React.FC = () => {
             <p className="text-gray-600 mb-4">{company.description}</p>
 
             <div className="flex items-center gap-4">
-              <a
-                href={company.website}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-500 text-sm font-medium"
-              >
-                Visit Website
-              </a>
-              <span className="text-sm text-gray-500">Founded {company.founded}</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 ml-6">
-            <button
-              onClick={toggleFollow}
-              className="p-2 text-gray-400 hover:text-blue-500 transition-colors"
-            >
-              {company.isFollowing ? (
-                <HeartSolidIcon className="h-6 w-6 text-blue-500" />
-              ) : (
-                <HeartIcon className="h-6 w-6" />
+              {company.website && (
+                <a
+                  href={company.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-500 text-sm font-medium"
+                >
+                  Visit Website
+                </a>
               )}
-            </button>
-            <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
-              <ShareIcon className="h-6 w-6" />
-            </button>
+              {company.founded && <span className="text-sm text-gray-500">Founded {company.founded}</span>}
+            </div>
           </div>
         </div>
       </div>
@@ -209,32 +150,36 @@ const CompanyDetailPage: React.FC = () => {
           </div>
 
           {/* Benefits */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Benefits & Perks</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {company.benefits.map((benefit, index) => (
-                <div key={index} className="flex items-center">
-                  <div className="h-2 w-2 bg-green-500 rounded-full mr-3"></div>
-                  <span className="text-gray-600">{benefit}</span>
-                </div>
-              ))}
+          {company.benefits && company.benefits.length > 0 && (
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">Benefits & Perks</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {company.benefits.map((benefit, index) => (
+                  <div key={index} className="flex items-center">
+                    <div className="h-2 w-2 bg-green-500 rounded-full mr-3" aria-hidden="true" />
+                    <span className="text-gray-600">{benefit.name}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Culture */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Company Culture</h2>
-            <div className="flex flex-wrap gap-2">
-              {company.culture.map((trait, index) => (
-                <span
-                  key={index}
-                  className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
-                >
-                  {trait}
-                </span>
-              ))}
+          {company.culture?.values && company.culture.values.length > 0 && (
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">Company Culture</h2>
+              <div className="flex flex-wrap gap-2">
+                {company.culture.values.map((trait, index) => (
+                  <span
+                    key={index}
+                    className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
+                  >
+                    {trait}
+                  </span>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -252,11 +197,11 @@ const CompanyDetailPage: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Founded</span>
-                <span className="font-medium">{company.founded}</span>
+                <span className="font-medium">{company.founded || 'Not specified'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Headquarters</span>
-                <span className="font-medium">{company.headquarters}</span>
+                <span className="font-medium">{company.headquarters?.city || 'Not specified'}</span>
               </div>
             </div>
           </div>
@@ -272,23 +217,23 @@ const CompanyDetailPage: React.FC = () => {
                 View all
               </Link>
             </div>
-            <div className="space-y-3">
-              <div className="border border-gray-200 rounded-lg p-3">
-                <h4 className="font-medium text-gray-900">Senior React Developer</h4>
-                <p className="text-sm text-gray-600">San Francisco, CA</p>
-                <p className="text-sm text-gray-500">$120,000 - $150,000</p>
+            {recentJobs.length === 0 ? (
+              <p className="text-sm text-gray-500">No open positions right now.</p>
+            ) : (
+              <div className="space-y-3">
+                {recentJobs.map((job) => (
+                  <Link
+                    key={job.id}
+                    to={`/jobs/${job.id}`}
+                    className="block border border-gray-200 rounded-lg p-3 hover:bg-gray-50"
+                  >
+                    <h4 className="font-medium text-gray-900">{job.title}</h4>
+                    <p className="text-sm text-gray-600">{job.type}</p>
+                    <p className="text-sm text-gray-500">{formatSalary(job.salary)}</p>
+                  </Link>
+                ))}
               </div>
-              <div className="border border-gray-200 rounded-lg p-3">
-                <h4 className="font-medium text-gray-900">Full Stack Engineer</h4>
-                <p className="text-sm text-gray-600">San Francisco, CA</p>
-                <p className="text-sm text-gray-500">$100,000 - $130,000</p>
-              </div>
-              <div className="border border-gray-200 rounded-lg p-3">
-                <h4 className="font-medium text-gray-900">Product Manager</h4>
-                <p className="text-sm text-gray-600">San Francisco, CA</p>
-                <p className="text-sm text-gray-500">$130,000 - $160,000</p>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -303,15 +248,9 @@ const CompanyDetailPage: React.FC = () => {
             >
               View All Jobs
             </Link>
-            <button
-              onClick={toggleFollow}
-              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium"
-            >
-              {company.isFollowing ? 'Following' : 'Follow Company'}
-            </button>
           </div>
           <div className="text-sm text-gray-500">
-            {company.jobsCount} open positions
+            {company.stats?.activeJobs ?? 0} open positions
           </div>
         </div>
       </div>

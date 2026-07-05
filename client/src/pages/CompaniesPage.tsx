@@ -1,184 +1,76 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { 
+import {
   MagnifyingGlassIcon,
   FunnelIcon,
   BuildingOfficeIcon,
   BriefcaseIcon,
   MapPinIcon,
   UserGroupIcon,
-  StarIcon,
-  HeartIcon
 } from '@heroicons/react/24/outline';
-import { HeartIcon as HeartSolidIcon, StarIcon as StarSolidIcon } from '@heroicons/react/24/solid';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorState from '../components/ErrorState';
+import { companyService, CompanyFilters } from '../services/companyService';
+import { Company } from '../types';
+import { renderStars } from '../utils/renderStars';
 
-interface Company {
-  id: string;
-  name: string;
-  logo: string;
-  industry: string;
-  size: string;
-  location: string;
-  description: string;
-  rating: number;
-  reviewCount: number;
-  isVerified: boolean;
-  isFollowing: boolean;
-  jobsCount: number;
-  benefits: string[];
-  culture: string[];
-}
+const PAGE_SIZE = 10;
 
 const CompaniesPage: React.FC = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filters, setFilters] = useState({
     industry: '',
     size: '',
-    location: '',
     verified: false,
   });
   const [showFilters, setShowFilters] = useState(false);
-  const [sortBy] = useState('rating');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ current: 1, pages: 1, total: 0 });
+
+  const loadCompanies = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const query: CompanyFilters = {
+        page,
+        limit: PAGE_SIZE,
+        search: searchTerm || undefined,
+        industry: filters.industry || undefined,
+        size: filters.size || undefined,
+        verified: filters.verified || undefined,
+      };
+
+      const response = await companyService.getCompanies(query);
+      setCompanies(response.data);
+      setPagination(response.pagination);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load companies. Please try again.');
+      setCompanies([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, searchTerm, filters]);
 
   useEffect(() => {
     loadCompanies();
-  }, [searchTerm, filters, sortBy]);
-
-  const loadCompanies = async () => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const mockCompanies: Company[] = [
-        {
-          id: '1',
-          name: 'TechCorp',
-          logo: '',
-          industry: 'Technology',
-          size: '201-500',
-          location: 'San Francisco, CA',
-          description: 'TechCorp is a leading technology company focused on innovation and growth. We build cutting-edge software solutions.',
-          rating: 4.5,
-          reviewCount: 128,
-          isVerified: true,
-          isFollowing: false,
-          jobsCount: 15,
-          benefits: ['Health Insurance', '401k', 'Flexible Hours', 'Remote Work'],
-          culture: ['Innovative', 'Collaborative', 'Fast-paced', 'Inclusive'],
-        },
-        {
-          id: '2',
-          name: 'DataFlow Inc.',
-          logo: '',
-          industry: 'Technology',
-          size: '51-200',
-          location: 'Remote',
-          description: 'DataFlow Inc. is a data analytics company that helps businesses make data-driven decisions.',
-          rating: 4.2,
-          reviewCount: 89,
-          isVerified: true,
-          isFollowing: true,
-          jobsCount: 8,
-          benefits: ['Health Insurance', 'Learning Budget', 'Stock Options', 'Remote Work'],
-          culture: ['Data-driven', 'Collaborative', 'Remote-first', 'Growth-oriented'],
-        },
-        {
-          id: '3',
-          name: 'StartupXYZ',
-          logo: '',
-          industry: 'Technology',
-          size: '11-50',
-          location: 'New York, NY',
-          description: 'StartupXYZ is an early-stage startup building the future of work with innovative solutions.',
-          rating: 4.0,
-          reviewCount: 45,
-          isVerified: false,
-          isFollowing: false,
-          jobsCount: 5,
-          benefits: ['Equity', 'Health Insurance', 'Flexible Hours', 'Learning Budget'],
-          culture: ['Startup', 'Fast-paced', 'Innovative', 'Collaborative'],
-        },
-        {
-          id: '4',
-          name: 'DesignStudio',
-          logo: '',
-          industry: 'Design',
-          size: '11-50',
-          location: 'Los Angeles, CA',
-          description: 'DesignStudio is a creative agency specializing in digital design and user experience.',
-          rating: 4.3,
-          reviewCount: 67,
-          isVerified: true,
-          isFollowing: false,
-          jobsCount: 3,
-          benefits: ['Health Insurance', 'Creative Freedom', 'Flexible Hours', 'Professional Development'],
-          culture: ['Creative', 'Collaborative', 'Design-focused', 'Inclusive'],
-        },
-        {
-          id: '5',
-          name: 'FinanceFirst',
-          logo: '',
-          industry: 'Finance',
-          size: '501-1000',
-          location: 'Chicago, IL',
-          description: 'FinanceFirst is a leading financial services company providing innovative banking solutions.',
-          rating: 4.1,
-          reviewCount: 156,
-          isVerified: true,
-          isFollowing: false,
-          jobsCount: 22,
-          benefits: ['Health Insurance', '401k', 'Pension', 'Professional Development'],
-          culture: ['Professional', 'Stable', 'Growth-oriented', 'Inclusive'],
-        },
-      ];
-
-      setCompanies(mockCompanies);
-      setLoading(false);
-    }, 1000);
-  };
+  }, [loadCompanies]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setPage(1);
     loadCompanies();
   };
 
   const handleFilterChange = (key: string, value: string | boolean) => {
+    setPage(1);
     setFilters(prev => ({
       ...prev,
       [key]: value,
     }));
-  };
-
-  const toggleFollow = (companyId: string) => {
-    setCompanies(prev => prev.map(company => 
-      company.id === companyId 
-        ? { ...company, isFollowing: !company.isFollowing }
-        : company
-    ));
-  };
-
-  const renderStars = (rating: number) => {
-    const stars = [];
-    const fullStars = Math.floor(rating);
-    const hasHalfStar = rating % 1 !== 0;
-
-    for (let i = 0; i < fullStars; i++) {
-      stars.push(<StarSolidIcon key={i} className="h-4 w-4 text-yellow-400" />);
-    }
-
-    if (hasHalfStar) {
-      stars.push(<StarIcon key="half" className="h-4 w-4 text-yellow-400" />);
-    }
-
-    const remainingStars = 5 - Math.ceil(rating);
-    for (let i = 0; i < remainingStars; i++) {
-      stars.push(<StarIcon key={`empty-${i}`} className="h-4 w-4 text-gray-300" />);
-    }
-
-    return stars;
   };
 
   return (
@@ -197,8 +89,10 @@ const CompaniesPage: React.FC = () => {
           {/* Search Bar */}
           <div className="flex gap-4">
             <div className="flex-1 relative">
-              <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" aria-hidden="true" />
+              <label htmlFor="company-search" className="sr-only">Search companies</label>
               <input
+                id="company-search"
                 type="text"
                 placeholder="Search companies..."
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
@@ -209,9 +103,11 @@ const CompaniesPage: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowFilters(!showFilters)}
+              aria-expanded={showFilters}
+              aria-controls="company-filters-panel"
               className="flex items-center px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
             >
-              <FunnelIcon className="h-5 w-5 mr-2" />
+              <FunnelIcon className="h-5 w-5 mr-2" aria-hidden="true" />
               Filters
             </button>
             <button
@@ -224,12 +120,13 @@ const CompaniesPage: React.FC = () => {
 
           {/* Filters */}
           {showFilters && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t">
+            <div id="company-filters-panel" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="filter-industry" className="block text-sm font-medium text-gray-700 mb-1">
                   Industry
                 </label>
                 <select
+                  id="filter-industry"
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   value={filters.industry}
                   onChange={(e) => handleFilterChange('industry', e.target.value)}
@@ -243,10 +140,11 @@ const CompaniesPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="filter-size" className="block text-sm font-medium text-gray-700 mb-1">
                   Company Size
                 </label>
                 <select
+                  id="filter-size"
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   value={filters.size}
                   onChange={(e) => handleFilterChange('size', e.target.value)}
@@ -259,19 +157,6 @@ const CompaniesPage: React.FC = () => {
                   <option value="501-1000">501-1000 employees</option>
                   <option value="1000+">1000+ employees</option>
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Location
-                </label>
-                <input
-                  type="text"
-                  placeholder="City, State"
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  value={filters.location}
-                  onChange={(e) => handleFilterChange('location', e.target.value)}
-                />
               </div>
 
               <div className="flex items-center">
@@ -297,6 +182,16 @@ const CompaniesPage: React.FC = () => {
           <div className="flex items-center justify-center h-64">
             <LoadingSpinner />
           </div>
+        ) : error ? (
+          <ErrorState message={error} onRetry={loadCompanies} />
+        ) : companies.length === 0 ? (
+          <div className="text-center py-12 bg-white shadow rounded-lg">
+            <BuildingOfficeIcon className="mx-auto h-12 w-12 text-gray-400" aria-hidden="true" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No companies found</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Try adjusting your search or filters.
+            </p>
+          </div>
         ) : (
           companies.map((company) => (
             <div key={company.id} className="bg-white shadow rounded-lg p-6 hover:shadow-lg transition-shadow">
@@ -305,7 +200,7 @@ const CompaniesPage: React.FC = () => {
                   <div className="flex items-center gap-3 mb-2">
                     <div className="flex-shrink-0">
                       <div className="h-12 w-12 bg-gray-200 rounded-lg flex items-center justify-center">
-                        <BuildingOfficeIcon className="h-6 w-6 text-gray-400" />
+                        <BuildingOfficeIcon className="h-6 w-6 text-gray-400" aria-hidden="true" />
                       </div>
                     </div>
                     <div>
@@ -321,18 +216,18 @@ const CompaniesPage: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-gray-600">
+                      <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
                         <div className="flex items-center">
-                          <MapPinIcon className="h-4 w-4 mr-1" />
-                          {company.location}
+                          <MapPinIcon className="h-4 w-4 mr-1" aria-hidden="true" />
+                          {company.headquarters?.city || 'Not specified'}
                         </div>
                         <div className="flex items-center">
-                          <UserGroupIcon className="h-4 w-4 mr-1" />
+                          <UserGroupIcon className="h-4 w-4 mr-1" aria-hidden="true" />
                           {company.size} employees
                         </div>
                         <div className="flex items-center">
-                          <BriefcaseIcon className="h-4 w-4 mr-1" />
-                          {company.jobsCount} jobs
+                          <BriefcaseIcon className="h-4 w-4 mr-1" aria-hidden="true" />
+                          {company.stats?.activeJobs ?? 0} jobs
                         </div>
                       </div>
                     </div>
@@ -343,43 +238,35 @@ const CompaniesPage: React.FC = () => {
                   <div className="flex items-center gap-4 mb-4">
                     <div className="flex items-center">
                       <div className="flex items-center">
-                        {renderStars(company.rating)}
+                        {renderStars(company.averageRating || 0)}
                       </div>
                       <span className="ml-1 text-sm text-gray-600">
-                        {company.rating} ({company.reviewCount} reviews)
+                        {company.averageRating || 0} ({company.totalReviews || 0} reviews)
                       </span>
                     </div>
                     <span className="text-sm text-gray-500">{company.industry}</span>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    {company.benefits.slice(0, 3).map((benefit, index) => (
-                      <span
-                        key={index}
-                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-                      >
-                        {benefit}
-                      </span>
-                    ))}
-                    {company.benefits.length > 3 && (
-                      <span className="text-xs text-gray-500">
-                        +{company.benefits.length - 3} more
-                      </span>
-                    )}
-                  </div>
+                  {company.benefits && company.benefits.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {company.benefits.slice(0, 3).map((benefit, index) => (
+                        <span
+                          key={index}
+                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                        >
+                          {benefit.name}
+                        </span>
+                      ))}
+                      {company.benefits.length > 3 && (
+                        <span className="text-xs text-gray-500">
+                          +{company.benefits.length - 3} more
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 ml-4">
-                  <button
-                    onClick={() => toggleFollow(company.id)}
-                    className="p-2 text-gray-400 hover:text-blue-500 transition-colors"
-                  >
-                    {company.isFollowing ? (
-                      <HeartSolidIcon className="h-5 w-5 text-blue-500" />
-                    ) : (
-                      <HeartIcon className="h-5 w-5" />
-                    )}
-                  </button>
                   <Link
                     to={`/companies/${company.id}`}
                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
@@ -394,35 +281,50 @@ const CompaniesPage: React.FC = () => {
       </div>
 
       {/* Pagination */}
-      {!loading && companies.length > 0 && (
+      {!loading && !error && companies.length > 0 && (
         <div className="flex items-center justify-between bg-white px-4 py-3 sm:px-6 rounded-lg shadow">
           <div className="flex-1 flex justify-between sm:hidden">
-            <button className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={pagination.current <= 1}
+              className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               Previous
             </button>
-            <button className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+            <button
+              onClick={() => setPage((p) => Math.min(pagination.pages, p + 1))}
+              disabled={pagination.current >= pagination.pages}
+              className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               Next
             </button>
           </div>
           <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
             <div>
               <p className="text-sm text-gray-700">
-                Showing <span className="font-medium">1</span> to <span className="font-medium">10</span> of{' '}
-                <span className="font-medium">97</span> results
+                Showing page <span className="font-medium">{pagination.current}</span> of{' '}
+                <span className="font-medium">{pagination.pages || 1}</span> ({pagination.total} results)
               </p>
             </div>
             <div>
-              <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                <button className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+              <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={pagination.current <= 1}
+                  aria-label="Previous page"
+                  className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   Previous
                 </button>
-                <button className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">
-                  1
-                </button>
-                <button className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">
-                  2
-                </button>
-                <button className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                <span className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
+                  {pagination.current}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(pagination.pages, p + 1))}
+                  disabled={pagination.current >= pagination.pages}
+                  aria-label="Next page"
+                  className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   Next
                 </button>
               </nav>

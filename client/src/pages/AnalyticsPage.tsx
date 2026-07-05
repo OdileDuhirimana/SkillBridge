@@ -1,61 +1,39 @@
-import React, { useState, useEffect } from 'react';
-import { 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
   EyeIcon,
   BriefcaseIcon,
-  UserGroupIcon,
   ClockIcon,
-  ArrowTrendingUpIcon
 } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorState from '../components/ErrorState';
+import { analyticsService, UserAnalytics } from '../services/analyticsService';
 
-interface AnalyticsData {
-  profileViews: number;
-  applications: number;
-  interviews: number;
-  offers: number;
-  connections: number;
-  skills: number;
-  experience: number;
-  education: number;
-  profileCompleteness: number;
-  jobMatchScore: number;
-  applicationSuccessRate: number;
-  averageResponseTime: number;
-}
+type TimeRange = '7d' | '30d' | '90d' | '1y';
 
 const AnalyticsPage: React.FC = () => {
-  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [analytics, setAnalytics] = useState<UserAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState('30d');
+  const [error, setError] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<TimeRange>('30d');
+
+  const loadAnalytics = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await analyticsService.getUserAnalytics(timeRange);
+      setAnalytics(data);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load analytics. Please try again.');
+      setAnalytics(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [timeRange]);
 
   useEffect(() => {
     loadAnalytics();
-  }, [timeRange]);
-
-  const loadAnalytics = async () => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const mockAnalytics: AnalyticsData = {
-        profileViews: 45,
-        applications: 12,
-        interviews: 3,
-        offers: 1,
-        connections: 23,
-        skills: 8,
-        experience: 2,
-        education: 1,
-        profileCompleteness: 85,
-        jobMatchScore: 78,
-        applicationSuccessRate: 25,
-        averageResponseTime: 2.5,
-      };
-
-      setAnalytics(mockAnalytics);
-      setLoading(false);
-    }, 1000);
-  };
+  }, [loadAnalytics]);
 
   if (loading) {
     return (
@@ -63,6 +41,10 @@ const AnalyticsPage: React.FC = () => {
         <LoadingSpinner />
       </div>
     );
+  }
+
+  if (error) {
+    return <ErrorState message={error} onRetry={loadAnalytics} />;
   }
 
   if (!analytics) {
@@ -73,6 +55,8 @@ const AnalyticsPage: React.FC = () => {
       </div>
     );
   }
+
+  const topSkills = analytics.skills.topSkills.slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -86,9 +70,11 @@ const AnalyticsPage: React.FC = () => {
             </p>
           </div>
           <div className="flex items-center space-x-2">
+            <label htmlFor="time-range" className="sr-only">Time range</label>
             <select
+              id="time-range"
               value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value)}
+              onChange={(e) => setTimeRange(e.target.value as TimeRange)}
               className="border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="7d">Last 7 days</option>
@@ -105,21 +91,15 @@ const AnalyticsPage: React.FC = () => {
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <EyeIcon className="h-8 w-8 text-blue-600" />
+              <EyeIcon className="h-8 w-8 text-blue-600" aria-hidden="true" />
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
                 <dt className="text-sm font-medium text-gray-500 truncate">
                   Profile Views
                 </dt>
-                <dd className="flex items-baseline">
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {analytics.profileViews}
-                  </div>
-                  <div className="ml-2 flex items-baseline text-sm font-semibold text-green-600">
-                    <ArrowTrendingUpIcon className="h-4 w-4" />
-                    <span className="ml-1">+12%</span>
-                  </div>
+                <dd className="text-2xl font-semibold text-gray-900">
+                  {analytics.userStats.profileViews}
                 </dd>
               </dl>
             </div>
@@ -129,21 +109,15 @@ const AnalyticsPage: React.FC = () => {
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <BriefcaseIcon className="h-8 w-8 text-green-600" />
+              <BriefcaseIcon className="h-8 w-8 text-green-600" aria-hidden="true" />
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
                 <dt className="text-sm font-medium text-gray-500 truncate">
-                  Applications
+                  Applications ({analytics.period})
                 </dt>
-                <dd className="flex items-baseline">
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {analytics.applications}
-                  </div>
-                  <div className="ml-2 flex items-baseline text-sm font-semibold text-green-600">
-                    <ArrowTrendingUpIcon className="h-4 w-4" />
-                    <span className="ml-1">+8%</span>
-                  </div>
+                <dd className="text-2xl font-semibold text-gray-900">
+                  {analytics.applications.total}
                 </dd>
               </dl>
             </div>
@@ -153,21 +127,15 @@ const AnalyticsPage: React.FC = () => {
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <ClockIcon className="h-8 w-8 text-yellow-600" />
+              <ClockIcon className="h-8 w-8 text-yellow-600" aria-hidden="true" />
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
                 <dt className="text-sm font-medium text-gray-500 truncate">
-                  Interviews
+                  Avg. Response Time
                 </dt>
-                <dd className="flex items-baseline">
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {analytics.interviews}
-                  </div>
-                  <div className="ml-2 flex items-baseline text-sm font-semibold text-green-600">
-                    <ArrowTrendingUpIcon className="h-4 w-4" />
-                    <span className="ml-1">+25%</span>
-                  </div>
+                <dd className="text-2xl font-semibold text-gray-900">
+                  {analytics.applications.avgResponseTime} days
                 </dd>
               </dl>
             </div>
@@ -177,21 +145,15 @@ const AnalyticsPage: React.FC = () => {
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <UserGroupIcon className="h-8 w-8 text-purple-600" />
+              <BriefcaseIcon className="h-8 w-8 text-purple-600" aria-hidden="true" />
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
                 <dt className="text-sm font-medium text-gray-500 truncate">
-                  Connections
+                  Success Rate
                 </dt>
-                <dd className="flex items-baseline">
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {analytics.connections}
-                  </div>
-                  <div className="ml-2 flex items-baseline text-sm font-semibold text-green-600">
-                    <ArrowTrendingUpIcon className="h-4 w-4" />
-                    <span className="ml-1">+15%</span>
-                  </div>
+                <dd className="text-2xl font-semibold text-gray-900">
+                  {analytics.insights.successRate.toFixed(0)}%
                 </dd>
               </dl>
             </div>
@@ -199,137 +161,58 @@ const AnalyticsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Profile Performance */}
+      {/* Application Status Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white shadow rounded-lg p-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Profile Completeness</h3>
-          <div className="space-y-4">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">Overall Progress</span>
-                <span className="text-sm font-medium text-gray-900">{analytics.profileCompleteness}%</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-blue-600 h-2 rounded-full"
-                  style={{ width: `${analytics.profileCompleteness}%` }}
-                ></div>
-              </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-4">Application Status</h3>
+          {Object.keys(analytics.applications.statusDistribution).length === 0 ? (
+            <p className="text-sm text-gray-500">No applications in this period yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {Object.entries(analytics.applications.statusDistribution).map(([status, count]) => (
+                <div key={status} className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600 capitalize">{status.replace(/-/g, ' ')}</span>
+                  <span className="text-sm font-medium text-gray-900">{count}</span>
+                </div>
+              ))}
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Skills</span>
-                <span className="text-sm text-gray-900">{analytics.skills}/10</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Experience</span>
-                <span className="text-sm text-gray-900">{analytics.experience}/5</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Education</span>
-                <span className="text-sm text-gray-900">{analytics.education}/3</span>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
 
         <div className="bg-white shadow rounded-lg p-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Job Search Performance</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-4">Job Search Insights</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Job Match Score</span>
-              <span className="text-sm font-medium text-gray-900">{analytics.jobMatchScore}%</span>
+              <span className="text-sm text-gray-600">Most Applied Category</span>
+              <span className="text-sm font-medium text-gray-900">{analytics.insights.mostAppliedCategory || 'N/A'}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Application Success Rate</span>
-              <span className="text-sm font-medium text-gray-900">{analytics.applicationSuccessRate}%</span>
+              <span className="text-sm text-gray-600">Most Applied Job Type</span>
+              <span className="text-sm font-medium text-gray-900">{analytics.insights.mostAppliedType || 'N/A'}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Average Response Time</span>
-              <span className="text-sm font-medium text-gray-900">{analytics.averageResponseTime} days</span>
+              <span className="text-sm text-gray-600">Success Rate</span>
+              <span className="text-sm font-medium text-gray-900">{analytics.insights.successRate.toFixed(1)}%</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Recent Activity */}
+      {/* Top Skills in Demand */}
       <div className="bg-white shadow rounded-lg p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Recent Activity</h3>
-        <div className="space-y-4">
-          <div className="flex items-center space-x-3">
-            <div className="flex-shrink-0">
-              <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center">
-                <EyeIcon className="h-4 w-4 text-blue-600" />
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Top Skills Requested by Jobs You Applied To</h3>
+        {topSkills.length === 0 ? (
+          <p className="text-sm text-gray-500">Apply to jobs to see which skills are most in demand.</p>
+        ) : (
+          <div className="space-y-3">
+            {topSkills.map(({ skill, count }) => (
+              <div key={skill} className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">{skill}</span>
+                <span className="text-sm font-medium text-gray-900">{count} job{count === 1 ? '' : 's'}</span>
               </div>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-gray-900">Your profile was viewed by 3 recruiters</p>
-              <p className="text-sm text-gray-500">2 hours ago</p>
-            </div>
+            ))}
           </div>
-          <div className="flex items-center space-x-3">
-            <div className="flex-shrink-0">
-              <div className="h-8 w-8 bg-green-100 rounded-full flex items-center justify-center">
-                <BriefcaseIcon className="h-4 w-4 text-green-600" />
-              </div>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-gray-900">You applied to Senior React Developer at TechCorp</p>
-              <p className="text-sm text-gray-500">1 day ago</p>
-            </div>
-          </div>
-          <div className="flex items-center space-x-3">
-            <div className="flex-shrink-0">
-              <div className="h-8 w-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                <ClockIcon className="h-4 w-4 text-yellow-600" />
-              </div>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-gray-900">Interview scheduled with DataFlow Inc.</p>
-              <p className="text-sm text-gray-500">2 days ago</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Recommendations */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Recommendations</h3>
-        <div className="space-y-3">
-          <div className="flex items-start space-x-3">
-            <div className="flex-shrink-0">
-              <div className="h-6 w-6 bg-blue-100 rounded-full flex items-center justify-center">
-                <span className="text-xs font-medium text-blue-600">1</span>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm text-gray-900">Add more skills to improve your job match score</p>
-              <p className="text-sm text-gray-500">Consider adding skills like TypeScript, Node.js, or AWS</p>
-            </div>
-          </div>
-          <div className="flex items-start space-x-3">
-            <div className="flex-shrink-0">
-              <div className="h-6 w-6 bg-blue-100 rounded-full flex items-center justify-center">
-                <span className="text-xs font-medium text-blue-600">2</span>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm text-gray-900">Complete your education section</p>
-              <p className="text-sm text-gray-500">Add your degree and certifications to increase profile completeness</p>
-            </div>
-          </div>
-          <div className="flex items-start space-x-3">
-            <div className="flex-shrink-0">
-              <div className="h-6 w-6 bg-blue-100 rounded-full flex items-center justify-center">
-                <span className="text-xs font-medium text-blue-600">3</span>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm text-gray-900">Update your resume</p>
-              <p className="text-sm text-gray-500">Upload a recent resume to improve your application success rate</p>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

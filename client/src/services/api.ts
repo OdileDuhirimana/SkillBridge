@@ -1,11 +1,23 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
+// REACT_APP_API_URL is the server's origin (e.g. "http://localhost:5000"),
+// NOT the REST API base path — this must stay consistent with
+// SocketContext.tsx, which connects Socket.io directly to this same origin
+// (Socket.io needs the bare origin, not a REST path). Appending "/api" here
+// (rather than requiring API_URL to already include it) is what keeps both
+// consumers of the same env var correct: previously this file's fallback
+// silently included "/api" while SocketContext's fallback did not, so any
+// deployment that only set REACT_APP_API_URL to the bare origin (matching
+// .env.example) would have sent every REST call to the wrong path.
+const API_ORIGIN = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_BASE_URL = `${API_ORIGIN.replace(/\/$/, '')}/api`;
+
 class ApiService {
   private api: AxiosInstance;
 
   constructor() {
     this.api = axios.create({
-      baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+      baseURL: API_BASE_URL,
       timeout: 10000,
     });
 

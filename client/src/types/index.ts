@@ -24,6 +24,7 @@ export interface User {
 }
 
 export interface Skill {
+  _id?: string;
   name: string;
   level: 'beginner' | 'intermediate' | 'advanced' | 'expert';
   verified: boolean;

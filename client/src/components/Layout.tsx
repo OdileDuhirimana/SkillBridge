@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { 
-  HomeIcon, 
-  BriefcaseIcon, 
-  BuildingOfficeIcon, 
-  UserIcon, 
+import {
+  HomeIcon,
+  BriefcaseIcon,
+  BuildingOfficeIcon,
+  UserIcon,
   ChatBubbleLeftRightIcon,
   ChartBarIcon,
   Cog6ToothIcon,
   Bars3Icon,
   XMarkIcon,
-  BellIcon
+  BellIcon,
+  ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
 
 interface LayoutProps {
@@ -20,8 +21,14 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
@@ -41,7 +48,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     <div className="min-h-screen bg-gray-50">
       {/* Mobile sidebar */}
       <div className={`fixed inset-0 z-50 lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}>
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          className="fixed inset-0 bg-gray-600 bg-opacity-75 cursor-default"
+          onClick={() => setSidebarOpen(false)}
+        />
         <div className="fixed inset-y-0 left-0 flex w-64 flex-col bg-white shadow-xl">
           <div className="flex h-16 items-center justify-between px-4">
             <div className="flex items-center">
@@ -51,13 +63,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
             <button
               type="button"
+              aria-label="Close navigation menu"
               className="text-gray-400 hover:text-gray-600"
               onClick={() => setSidebarOpen(false)}
             >
-              <XMarkIcon className="h-6 w-6" />
+              <XMarkIcon className="h-6 w-6" aria-hidden="true" />
             </button>
           </div>
-          <nav className="flex-1 space-y-1 px-2 py-4">
+          <nav className="flex-1 space-y-1 px-2 py-4" aria-label="Mobile navigation">
             {navigation.map((item) => {
               const Icon = item.icon;
               return (
@@ -71,7 +84,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   } group flex items-center px-2 py-2 text-sm font-medium border-l-4`}
                   onClick={() => setSidebarOpen(false)}
                 >
-                  <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                  <Icon className="mr-3 h-5 w-5 flex-shrink-0" aria-hidden="true" />
                   {item.name}
                 </Link>
               );
@@ -90,7 +103,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </div>
             </div>
           </div>
-          <nav className="flex-1 space-y-1 px-2 py-4">
+          <nav className="flex-1 space-y-1 px-2 py-4" aria-label="Primary navigation">
             {navigation.map((item) => {
               const Icon = item.icon;
               return (
@@ -103,7 +116,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       : 'border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   } group flex items-center px-2 py-2 text-sm font-medium border-l-4`}
                 >
-                  <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                  <Icon className="mr-3 h-5 w-5 flex-shrink-0" aria-hidden="true" />
                   {item.name}
                 </Link>
               );
@@ -112,16 +125,28 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
       </div>
 
+      {/* Skip link: hidden until keyboard-focused, lets keyboard/screen-reader
+          users bypass the two nav regions above and jump straight to page
+          content — closes a real gap flagged by the portfolio audit (FE-04:
+          "no skip-navigation link found"). */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:rounded-md focus:bg-blue-600 focus:px-4 focus:py-2 focus:text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+      >
+        Skip to main content
+      </a>
+
       {/* Main content */}
       <div className="lg:pl-64">
         {/* Top navigation */}
         <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
           <button
             type="button"
+            aria-label="Open navigation menu"
             className="-m-2.5 p-2.5 text-gray-700 lg:hidden"
             onClick={() => setSidebarOpen(true)}
           >
-            <Bars3Icon className="h-6 w-6" />
+            <Bars3Icon className="h-6 w-6" aria-hidden="true" />
           </button>
 
           <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
@@ -130,9 +155,20 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {/* Notifications */}
               <button
                 type="button"
+                aria-label="View notifications"
                 className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500"
               >
-                <BellIcon className="h-6 w-6" />
+                <BellIcon className="h-6 w-6" aria-hidden="true" />
+              </button>
+
+              {/* Logout */}
+              <button
+                type="button"
+                aria-label="Log out"
+                onClick={handleLogout}
+                className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500"
+              >
+                <ArrowRightOnRectangleIcon className="h-6 w-6" aria-hidden="true" />
               </button>
 
               {/* Profile dropdown */}
@@ -156,7 +192,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
 
         {/* Page content */}
-        <main className="py-6">
+        <main id="main-content" className="py-6" tabIndex={-1}>
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             {children}
           </div>

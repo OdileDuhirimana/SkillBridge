@@ -1,173 +1,65 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { 
+import {
   MapPinIcon,
   ClockIcon,
   CurrencyDollarIcon,
   BuildingOfficeIcon,
-  HeartIcon,
-  ShareIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
 } from '@heroicons/react/24/outline';
-import { HeartIcon as HeartSolidIcon } from '@heroicons/react/24/solid';
+import toast from 'react-hot-toast';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorState from '../components/ErrorState';
+import { jobService } from '../services/jobService';
+import { applicationService } from '../services/applicationService';
+import { Job } from '../types';
+import { formatSalary, formatLocation } from '../utils/formatters';
 
-interface Job {
-  id: string;
-  title: string;
-  company: {
-    id: string;
-    name: string;
-    logo: string;
-    industry: string;
-    size: string;
-    description: string;
-  };
-  location: {
-    city: string;
-    state: string;
-    country: string;
-    isRemote: boolean;
-  };
-  type: string;
-  level: string;
-  category: string;
-  salary: {
-    min: number;
-    max: number;
-    currency: string;
-  };
-  description: string;
-  requirements: string[];
-  responsibilities: string[];
-  benefits: string[];
-  skills: string[];
-  postedAt: string;
-  isFeatured: boolean;
-  isUrgent: boolean;
-  match: number;
-  isSaved: boolean;
-  hasApplied: boolean;
-}
+type JobWithApplicationState = Job & { hasApplied: boolean };
 
 const JobDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const [job, setJob] = useState<Job | null>(null);
+  const [job, setJob] = useState<JobWithApplicationState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [showApplicationForm, setShowApplicationForm] = useState(false);
+  const [coverLetter, setCoverLetter] = useState('');
 
   const loadJob = useCallback(async () => {
+    if (!id) return;
     setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const mockJob: Job = {
-        id: id || '1',
-        title: 'Senior React Developer',
-        company: {
-          id: '1',
-          name: 'TechCorp',
-          logo: '',
-          industry: 'Technology',
-          size: '201-500',
-          description: 'TechCorp is a leading technology company focused on innovation and growth.',
-        },
-        location: {
-          city: 'San Francisco',
-          state: 'CA',
-          country: 'USA',
-          isRemote: false,
-        },
-        type: 'Full-time',
-        level: 'Senior',
-        category: 'Technology',
-        salary: {
-          min: 120000,
-          max: 150000,
-          currency: 'USD',
-        },
-        description: `We are looking for a senior React developer to join our dynamic team. You will be responsible for building and maintaining our web applications using React, TypeScript, and modern frontend technologies.
+    setError(null);
 
-As a senior developer, you will:
-- Lead the development of complex React applications
-- Mentor junior developers
-- Collaborate with cross-functional teams
-- Contribute to architectural decisions
-- Ensure code quality and best practices`,
-        requirements: [
-          '5+ years of experience with React and JavaScript',
-          'Strong understanding of TypeScript',
-          'Experience with state management (Redux, Zustand)',
-          'Knowledge of modern CSS frameworks (Tailwind, Styled Components)',
-          'Experience with testing frameworks (Jest, React Testing Library)',
-          'Familiarity with build tools (Webpack, Vite)',
-          'Experience with version control (Git)',
-          'Strong problem-solving skills',
-        ],
-        responsibilities: [
-          'Develop and maintain React applications',
-          'Write clean, maintainable, and efficient code',
-          'Collaborate with designers and backend developers',
-          'Participate in code reviews',
-          'Mentor junior team members',
-          'Stay up-to-date with latest technologies',
-        ],
-        benefits: [
-          'Competitive salary and equity',
-          'Comprehensive health insurance',
-          '401(k) with company matching',
-          'Flexible work arrangements',
-          'Professional development budget',
-          'Gym membership',
-          'Catered meals',
-          'Unlimited PTO',
-        ],
-        skills: ['React', 'TypeScript', 'JavaScript', 'CSS', 'HTML', 'Git', 'Node.js'],
-        postedAt: '2 hours ago',
-        isFeatured: true,
-        isUrgent: false,
-        match: 95,
-        isSaved: false,
-        hasApplied: false,
-      };
-
-      setJob(mockJob);
+    try {
+      const data = await jobService.getJob(id);
+      setJob(data);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load this job. Please try again.');
+      setJob(null);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   }, [id]);
 
   useEffect(() => {
     loadJob();
   }, [loadJob]);
 
-  const handleSaveJob = () => {
-    if (job) {
-      setJob(prev => prev ? { ...prev, isSaved: !prev.isSaved } : null);
-    }
-  };
-
   const handleApply = async () => {
+    if (!id) return;
     setApplying(true);
-    
-    // Simulate application process
-    setTimeout(() => {
-      if (job) {
-        setJob(prev => prev ? { ...prev, hasApplied: true } : null);
-        setShowApplicationForm(false);
-      }
+
+    try {
+      await applicationService.createApplication({ jobId: id, coverLetter: coverLetter || undefined });
+      setJob((prev) => (prev ? { ...prev, hasApplied: true } : null));
+      setShowApplicationForm(false);
+      toast.success('Application submitted successfully!');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to submit application.');
+    } finally {
       setApplying(false);
-    }, 2000);
-  };
-
-  const formatSalary = (salary: Job['salary']) => {
-    return `$${salary.min.toLocaleString()} - $${salary.max.toLocaleString()}`;
-  };
-
-  const getMatchColor = (match: number) => {
-    if (match >= 90) return 'text-green-600 bg-green-100';
-    if (match >= 80) return 'text-yellow-600 bg-yellow-100';
-    return 'text-red-600 bg-red-100';
+    }
   };
 
   if (loading) {
@@ -176,6 +68,10 @@ As a senior developer, you will:
         <LoadingSpinner />
       </div>
     );
+  }
+
+  if (error) {
+    return <ErrorState message={error} onRetry={loadJob} />;
   }
 
   if (!job) {
@@ -189,6 +85,9 @@ As a senior developer, you will:
       </div>
     );
   }
+
+  const requirementLines = job.requirements ? job.requirements.split('\n').filter(Boolean) : [];
+  const responsibilityLines = job.responsibilities ? job.responsibilities.split('\n').filter(Boolean) : [];
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -210,78 +109,60 @@ As a senior developer, you will:
               )}
             </div>
 
-            <div className="flex items-center gap-6 text-sm text-gray-600 mb-4">
+            <div className="flex flex-wrap items-center gap-6 text-sm text-gray-600 mb-4">
               <div className="flex items-center">
-                <BuildingOfficeIcon className="h-5 w-5 mr-2" />
-                <Link to={`/companies/${job.company.id}`} className="hover:text-blue-600">
-                  {job.company.name}
+                <BuildingOfficeIcon className="h-5 w-5 mr-2" aria-hidden="true" />
+                <Link to={`/companies/${job.company?.id}`} className="hover:text-blue-600">
+                  {job.company?.name || 'Unknown company'}
                 </Link>
               </div>
               <div className="flex items-center">
-                <MapPinIcon className="h-5 w-5 mr-2" />
-                {job.location.isRemote ? 'Remote' : `${job.location.city}, ${job.location.state}`}
+                <MapPinIcon className="h-5 w-5 mr-2" aria-hidden="true" />
+                {formatLocation(job.location)}
               </div>
               <div className="flex items-center">
-                <ClockIcon className="h-5 w-5 mr-2" />
+                <ClockIcon className="h-5 w-5 mr-2" aria-hidden="true" />
                 {job.type}
               </div>
               <div className="flex items-center">
-                <CurrencyDollarIcon className="h-5 w-5 mr-2" />
+                <CurrencyDollarIcon className="h-5 w-5 mr-2" aria-hidden="true" />
                 {formatSalary(job.salary)}
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMatchColor(job.match)}`}>
-                {job.match}% match
-              </span>
-              <span className="text-sm text-gray-500">Posted {job.postedAt}</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 ml-6">
-            <button
-              onClick={handleSaveJob}
-              className="p-2 text-gray-400 hover:text-red-500 transition-colors"
-            >
-              {job.isSaved ? (
-                <HeartSolidIcon className="h-6 w-6 text-red-500" />
-              ) : (
-                <HeartIcon className="h-6 w-6" />
-              )}
-            </button>
-            <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
-              <ShareIcon className="h-6 w-6" />
-            </button>
+            <span className="text-sm text-gray-500">
+              Posted {new Date(job.createdAt).toLocaleDateString()}
+            </span>
           </div>
         </div>
       </div>
 
       {/* Company Info */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">About {job.company.name}</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-          <div>
-            <span className="text-sm font-medium text-gray-500">Industry</span>
-            <p className="text-gray-900">{job.company.industry}</p>
+      {job.company && (
+        <div className="bg-white shadow rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">About {job.company.name}</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <span className="text-sm font-medium text-gray-500">Industry</span>
+              <p className="text-gray-900">{job.company.industry || 'Not specified'}</p>
+            </div>
+            <div>
+              <span className="text-sm font-medium text-gray-500">Company Size</span>
+              <p className="text-gray-900">{job.company.size ? `${job.company.size} employees` : 'Not specified'}</p>
+            </div>
+            <div>
+              <span className="text-sm font-medium text-gray-500">Location</span>
+              <p className="text-gray-900">{formatLocation(job.location)}</p>
+            </div>
           </div>
-          <div>
-            <span className="text-sm font-medium text-gray-500">Company Size</span>
-            <p className="text-gray-900">{job.company.size} employees</p>
-          </div>
-          <div>
-            <span className="text-sm font-medium text-gray-500">Location</span>
-            <p className="text-gray-900">{job.location.city}, {job.location.state}</p>
-          </div>
+          <Link
+            to={`/companies/${job.company.id}`}
+            className="mt-4 inline-flex items-center text-blue-600 hover:text-blue-500"
+          >
+            View Company Profile
+          </Link>
         </div>
-        <p className="text-gray-600">{job.company.description}</p>
-        <Link
-          to={`/companies/${job.company.id}`}
-          className="mt-4 inline-flex items-center text-blue-600 hover:text-blue-500"
-        >
-          View Company Profile
-        </Link>
-      </div>
+      )}
 
       {/* Job Description */}
       <div className="bg-white shadow rounded-lg p-6">
@@ -292,88 +173,80 @@ As a senior developer, you will:
       </div>
 
       {/* Requirements */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Requirements</h2>
-        <ul className="space-y-2">
-          {job.requirements.map((requirement, index) => (
-            <li key={index} className="flex items-start">
-              <CheckCircleIcon className="h-5 w-5 text-green-500 mr-3 mt-0.5 flex-shrink-0" />
-              <span className="text-gray-600">{requirement}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      {requirementLines.length > 0 && (
+        <div className="bg-white shadow rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Requirements</h2>
+          <ul className="space-y-2">
+            {requirementLines.map((requirement, index) => (
+              <li key={index} className="flex items-start">
+                <CheckCircleIcon className="h-5 w-5 text-green-500 mr-3 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                <span className="text-gray-600">{requirement}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Responsibilities */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Responsibilities</h2>
-        <ul className="space-y-2">
-          {job.responsibilities.map((responsibility, index) => (
-            <li key={index} className="flex items-start">
-              <CheckCircleIcon className="h-5 w-5 text-blue-500 mr-3 mt-0.5 flex-shrink-0" />
-              <span className="text-gray-600">{responsibility}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Benefits */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Benefits & Perks</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          {job.benefits.map((benefit, index) => (
-            <div key={index} className="flex items-center">
-              <CheckCircleIcon className="h-4 w-4 text-green-500 mr-2 flex-shrink-0" />
-              <span className="text-gray-600">{benefit}</span>
-            </div>
-          ))}
+      {responsibilityLines.length > 0 && (
+        <div className="bg-white shadow rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Responsibilities</h2>
+          <ul className="space-y-2">
+            {responsibilityLines.map((responsibility, index) => (
+              <li key={index} className="flex items-start">
+                <CheckCircleIcon className="h-5 w-5 text-blue-500 mr-3 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                <span className="text-gray-600">{responsibility}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-      </div>
+      )}
 
       {/* Skills */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Required Skills</h2>
-        <div className="flex flex-wrap gap-2">
-          {job.skills.map((skill, index) => (
-            <span
-              key={index}
-              className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
-            >
-              {skill}
-            </span>
-          ))}
+      {job.skills && job.skills.length > 0 && (
+        <div className="bg-white shadow rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Required Skills</h2>
+          <div className="flex flex-wrap gap-2">
+            {job.skills.map((skill, index) => (
+              <span
+                key={index}
+                className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
+              >
+                {skill.name}
+              </span>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Application Form */}
       {showApplicationForm && (
         <div className="bg-white shadow rounded-lg p-6">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">Apply for this position</h2>
-          <form className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleApply();
+            }}
+          >
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="cover-letter" className="block text-sm font-medium text-gray-700 mb-1">
                 Cover Letter
               </label>
               <textarea
+                id="cover-letter"
                 rows={4}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder="Tell us why you're interested in this position..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Resume
-              </label>
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx"
-                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                value={coverLetter}
+                onChange={(e) => setCoverLetter(e.target.value)}
+                maxLength={2000}
               />
             </div>
             <div className="flex items-center gap-4">
               <button
-                type="button"
-                onClick={handleApply}
+                type="submit"
                 disabled={applying}
                 className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -397,7 +270,7 @@ As a senior developer, you will:
           <div className="flex items-center gap-4">
             {job.hasApplied ? (
               <div className="flex items-center text-green-600">
-                <CheckCircleIcon className="h-5 w-5 mr-2" />
+                <CheckCircleIcon className="h-5 w-5 mr-2" aria-hidden="true" />
                 <span className="font-medium">Application Submitted</span>
               </div>
             ) : (
@@ -408,15 +281,14 @@ As a senior developer, you will:
                 Apply Now
               </button>
             )}
-            <Link
-              to={`/companies/${job.company.id}`}
-              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium"
-            >
-              View Company
-            </Link>
-          </div>
-          <div className="text-sm text-gray-500">
-            {job.match}% match with your profile
+            {job.company && (
+              <Link
+                to={`/companies/${job.company.id}`}
+                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium"
+              >
+                View Company
+              </Link>
+            )}
           </div>
         </div>
       </div>
