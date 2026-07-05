@@ -1,15 +1,98 @@
 const Job = require('../models/Job');
 const Company = require('../models/Company');
 const Application = require('../models/Application');
+const { canManageCompany } = require('../utils/authorization');
+const { sanitizeSearchInput, sanitizeTextSearchInput } = require('../utils/sanitize');
+const { getPaginationParams, buildPaginationMeta } = require('../utils/pagination');
+const { buildCacheKey, getCached, setCached, invalidateByPrefix } = require('../utils/cache');
+
+// Named constant replaces the previously inlined "10" default-page-size
+// magic value scattered across multiple controllers.
+const DEFAULT_PAGE_SIZE = 10;
+
+// Cache namespace for `GET /api/jobs` listings. Job search results change
+// whenever any job is created/updated/deleted or its status transitions
+// (e.g. filled/closed), so a short TTL plus explicit invalidation on every
+// write (see createJob/updateJob/deleteJob below) keeps staleness bounded
+// even if an invalidation call site is ever missed.
+const JOBS_LIST_CACHE_NAMESPACE = 'jobs:list';
+const JOBS_LIST_CACHE_TTL_SECONDS = 60;
+
+/**
+ * Build the Mongoose query for job filtering.
+ *
+ * WHY this is a separate function: the original implementation assigned to
+ * `query.$or` independently for the location filter, the salary filter, and
+ * the search filter. Because each assignment overwrote the previous one,
+ * supplying more than one of {location, salary, search} silently dropped
+ * all but the last filter — a real, demonstrable bug in the core job-listing
+ * endpoint (confirmed by the portfolio audit, SCALE-03). Each filter now
+ * contributes its own independent `$or` clause into a top-level `$and`
+ * array, so filters compose correctly regardless of how many are supplied.
+ */
+const buildJobQuery = ({ category, type, level, remote, featured, urgent, location, salaryMin, salaryMax, search }) => {
+  const query = { status: 'active' };
+  const andConditions = [];
+
+  if (category) query.category = category;
+  if (type) query.type = type;
+  if (level) query.level = level;
+  if (remote !== undefined) query.isRemote = remote === 'true';
+  if (featured === 'true') query.isFeatured = true;
+  if (urgent === 'true') query.isUrgent = true;
+
+  // WHY sanitize here: `location`/`search` are user-controlled strings that
+  // flow directly into `$regex`/`new RegExp()`. Escaping regex metacharacters
+  // and capping length closes both a regex-injection surface (a value like
+  // `.*` matching everything) and a ReDoS surface (catastrophic backtracking
+  // from a crafted pattern) — see server/utils/sanitize.js for full rationale.
+  const safeLocation = sanitizeSearchInput(location);
+  if (safeLocation) {
+    andConditions.push({
+      $or: [
+        { 'location.address.city': { $regex: safeLocation, $options: 'i' } },
+        { 'location.address.state': { $regex: safeLocation, $options: 'i' } },
+        { 'location.address.country': { $regex: safeLocation, $options: 'i' } }
+      ]
+    });
+  }
+
+  if (salaryMin || salaryMax) {
+    const salaryConditions = {};
+    if (salaryMin) salaryConditions['salary.max'] = { $gte: parseInt(salaryMin, 10) };
+    if (salaryMax) salaryConditions['salary.min'] = { ...(salaryConditions['salary.min'] || {}), $lte: parseInt(salaryMax, 10) };
+    andConditions.push(salaryConditions);
+  }
+
+  // WHY `$text` instead of a regex `$or` across title/description/category/
+  // tags: `server/models/Job.js` already declares a compound text index
+  // covering exactly those fields (`jobSchema.index({ title: 'text', ... })`)
+  // — but the regex version of this query could never use it (MongoDB
+  // cannot use a text index to serve a `$regex` match), so every search
+  // request degraded to a full collection scan regardless of the index
+  // sitting unused right next to it. `$text` is the query operator that
+  // actually engages that index, so this is a real query-optimization
+  // change, not just a syntax swap. Note this does change match semantics
+  // from "substring anywhere" to "matches indexed word stems" — a expected,
+  // standard tradeoff of moving to indexed full-text search.
+  const safeTextSearch = sanitizeTextSearchInput(search);
+  if (safeTextSearch) {
+    andConditions.push({ $text: { $search: safeTextSearch } });
+  }
+
+  if (andConditions.length > 0) {
+    query.$and = andConditions;
+  }
+
+  return query;
+};
 
 // @desc    Get all jobs
 // @route   GET /api/jobs
 // @access  Public
-const getJobs = async (req, res) => {
+const getJobs = async (req, res, next) => {
   try {
     const {
-      page = 1,
-      limit = 10,
       category,
       type,
       level,
@@ -24,42 +107,22 @@ const getJobs = async (req, res) => {
       urgent
     } = req.query;
 
-    const query = { status: 'active' };
+    const { page, limit, skip } = getPaginationParams(req.query, DEFAULT_PAGE_SIZE);
 
-    // Apply filters
-    if (category) query.category = category;
-    if (type) query.type = type;
-    if (level) query.level = level;
-    if (remote !== undefined) query.isRemote = remote === 'true';
-    if (featured === 'true') query.isFeatured = true;
-    if (urgent === 'true') query.isUrgent = true;
-
-    // Location filter
-    if (location) {
-      query.$or = [
-        { 'location.address.city': { $regex: location, $options: 'i' } },
-        { 'location.address.state': { $regex: location, $options: 'i' } },
-        { 'location.address.country': { $regex: location, $options: 'i' } }
-      ];
+    // `GET /api/jobs` is the platform's highest-traffic read (per
+    // docs/architecture.md), and its result depends only on the request's
+    // own query params — an ideal, low-risk candidate for caching. The
+    // cache key is a hash of every param that affects the result, so
+    // different filter/sort/page combinations never collide.
+    const cacheKey = buildCacheKey(JOBS_LIST_CACHE_NAMESPACE, {
+      page, limit, category, type, level, location, remote, salaryMin, salaryMax, search, sortBy, sortOrder, featured, urgent
+    });
+    const cached = await getCached(cacheKey);
+    if (cached) {
+      return res.json(cached);
     }
 
-    // Salary filter
-    if (salaryMin || salaryMax) {
-      query.$or = [
-        { 'salary.min': { $gte: parseInt(salaryMin) || 0 } },
-        { 'salary.max': { $lte: parseInt(salaryMax) || 999999 } }
-      ];
-    }
-
-    // Search filter
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { category: { $regex: search, $options: 'i' } },
-        { tags: { $in: [new RegExp(search, 'i')] } }
-      ];
-    }
+    const query = buildJobQuery({ category, type, level, remote, featured, urgent, location, salaryMin, salaryMax, search });
 
     const sort = {};
     sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
@@ -68,34 +131,30 @@ const getJobs = async (req, res) => {
       .populate('company', 'name logo industry size headquarters')
       .populate('postedBy', 'firstName lastName avatar')
       .sort(sort)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(limit)
+      .skip(skip);
 
     const total = await Job.countDocuments(query);
 
-    res.json({
+    const responseBody = {
       success: true,
       count: jobs.length,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total
-      },
+      pagination: buildPaginationMeta(page, limit, total),
       data: jobs
-    });
+    };
+
+    await setCached(cacheKey, responseBody, JOBS_LIST_CACHE_TTL_SECONDS);
+
+    res.json(responseBody);
   } catch (error) {
-    console.error('Get jobs error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Get single job
 // @route   GET /api/jobs/:id
 // @access  Public
-const getJob = async (req, res) => {
+const getJob = async (req, res, next) => {
   try {
     const job = await Job.findById(req.params.id)
       .populate('company', 'name logo industry size headquarters description benefits culture')
@@ -131,18 +190,14 @@ const getJob = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get job error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Create job
 // @route   POST /api/jobs
 // @access  Private/Employer
-const createJob = async (req, res) => {
+const createJob = async (req, res, next) => {
   try {
     const company = await Company.findById(req.body.company);
     if (!company) {
@@ -152,14 +207,7 @@ const createJob = async (req, res) => {
       });
     }
 
-    // Check if user has permission to post jobs for this company
-    const isOwner = company.owner.toString() === req.user.id;
-    const isTeamMember = company.team.some(member => 
-      member.user.toString() === req.user.id && 
-      member.permissions.includes('create_jobs')
-    );
-
-    if (!isOwner && !isTeamMember && req.user.role !== 'admin') {
+    if (!canManageCompany(company, req.user, 'create_jobs')) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to post jobs for this company'
@@ -180,24 +228,26 @@ const createJob = async (req, res) => {
       .populate('company', 'name logo industry')
       .populate('postedBy', 'firstName lastName avatar');
 
+    // Every cached `GET /api/jobs` listing may now be stale (a new active
+    // job could match any filter combination), so drop all of them rather
+    // than trying to reason about which specific cached queries this job
+    // would have matched.
+    await invalidateByPrefix(JOBS_LIST_CACHE_NAMESPACE);
+
     res.status(201).json({
       success: true,
       message: 'Job created successfully',
       data: populatedJob
     });
   } catch (error) {
-    console.error('Create job error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Update job
 // @route   PUT /api/jobs/:id
 // @access  Private/Employer
-const updateJob = async (req, res) => {
+const updateJob = async (req, res, next) => {
   try {
     const job = await Job.findById(req.params.id);
     if (!job) {
@@ -207,15 +257,8 @@ const updateJob = async (req, res) => {
       });
     }
 
-    // Check if user has permission to update this job
     const company = await Company.findById(job.company);
-    const isOwner = company.owner.toString() === req.user.id;
-    const isTeamMember = company.team.some(member => 
-      member.user.toString() === req.user.id && 
-      member.permissions.includes('edit_jobs')
-    );
-
-    if (!isOwner && !isTeamMember && req.user.role !== 'admin') {
+    if (!canManageCompany(company, req.user, 'edit_jobs')) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this job'
@@ -229,24 +272,22 @@ const updateJob = async (req, res) => {
     ).populate('company', 'name logo industry')
      .populate('postedBy', 'firstName lastName avatar');
 
+    await invalidateByPrefix(JOBS_LIST_CACHE_NAMESPACE);
+
     res.json({
       success: true,
       message: 'Job updated successfully',
       data: updatedJob
     });
   } catch (error) {
-    console.error('Update job error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Delete job
 // @route   DELETE /api/jobs/:id
 // @access  Private/Employer
-const deleteJob = async (req, res) => {
+const deleteJob = async (req, res, next) => {
   try {
     const job = await Job.findById(req.params.id);
     if (!job) {
@@ -256,15 +297,8 @@ const deleteJob = async (req, res) => {
       });
     }
 
-    // Check if user has permission to delete this job
     const company = await Company.findById(job.company);
-    const isOwner = company.owner.toString() === req.user.id;
-    const isTeamMember = company.team.some(member => 
-      member.user.toString() === req.user.id && 
-      member.permissions.includes('delete_jobs')
-    );
-
-    if (!isOwner && !isTeamMember && req.user.role !== 'admin') {
+    if (!canManageCompany(company, req.user, 'delete_jobs')) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to delete this job'
@@ -278,29 +312,27 @@ const deleteJob = async (req, res) => {
     company.stats.activeJobs -= 1;
     await company.save();
 
+    await invalidateByPrefix(JOBS_LIST_CACHE_NAMESPACE);
+
     res.json({
       success: true,
       message: 'Job deleted successfully'
     });
   } catch (error) {
-    console.error('Delete job error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Get trending jobs
 // @route   GET /api/jobs/trending
 // @access  Public
-const getTrendingJobs = async (req, res) => {
+const getTrendingJobs = async (req, res, next) => {
   try {
-    const { limit = 10 } = req.query;
+    const { limit = DEFAULT_PAGE_SIZE } = req.query;
 
     const jobs = await Job.find({ status: 'active' })
       .sort({ 'stats.views': -1, 'stats.applications': -1, createdAt: -1 })
-      .limit(parseInt(limit))
+      .limit(parseInt(limit, 10))
       .populate('company', 'name logo industry')
       .populate('postedBy', 'firstName lastName avatar');
 
@@ -310,20 +342,17 @@ const getTrendingJobs = async (req, res) => {
       data: jobs
     });
   } catch (error) {
-    console.error('Get trending jobs error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Get jobs by company
 // @route   GET /api/jobs/company/:companyId
 // @access  Public
-const getJobsByCompany = async (req, res) => {
+const getJobsByCompany = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, status = 'active' } = req.query;
+    const { status = 'active' } = req.query;
+    const { page, limit, skip } = getPaginationParams(req.query, DEFAULT_PAGE_SIZE);
 
     const query = { company: req.params.companyId };
     if (status) query.status = status;
@@ -332,34 +361,26 @@ const getJobsByCompany = async (req, res) => {
       .populate('company', 'name logo industry')
       .populate('postedBy', 'firstName lastName avatar')
       .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(limit)
+      .skip(skip);
 
     const total = await Job.countDocuments(query);
 
     res.json({
       success: true,
       count: jobs.length,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total
-      },
+      pagination: buildPaginationMeta(page, limit, total),
       data: jobs
     });
   } catch (error) {
-    console.error('Get company jobs error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Save/unsave job
 // @route   POST /api/jobs/:id/save
 // @access  Private
-const saveJob = async (req, res) => {
+const saveJob = async (req, res, next) => {
   try {
     const job = await Job.findById(req.params.id);
     if (!job) {
@@ -369,38 +390,34 @@ const saveJob = async (req, res) => {
       });
     }
 
-    // This would typically be handled by a separate SavedJob model
-    // For now, we'll just return success
-    res.json({
-      success: true,
-      message: 'Job saved successfully'
+    // NOTE (known gap, intentionally not implemented in this pass): saving
+    // jobs requires a persisted SavedJob relation (or a `savedBy` array on
+    // Job/User) to actually track state per-user. Until that model exists,
+    // this endpoint is intentionally left unimplemented rather than faking
+    // a success response with no persisted effect — the frontend does not
+    // call this endpoint. See docs/architecture.md "Known Technical Debt".
+    return res.status(501).json({
+      success: false,
+      message: 'Saving jobs is not yet implemented'
     });
   } catch (error) {
-    console.error('Save job error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Get job categories
 // @route   GET /api/jobs/categories
 // @access  Public
-const getJobCategories = async (req, res) => {
+const getJobCategories = async (req, res, next) => {
   try {
     const categories = await Job.distinct('category');
-    
+
     res.json({
       success: true,
       data: categories
     });
   } catch (error) {
-    console.error('Get categories error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
@@ -413,6 +430,6 @@ module.exports = {
   getTrendingJobs,
   getJobsByCompany,
   saveJob,
-  getJobCategories
+  getJobCategories,
+  buildJobQuery
 };
-

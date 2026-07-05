@@ -6,17 +6,67 @@ const Company = require('../models/Company');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
+const { canManageCompany } = require('../utils/authorization');
+const { getPaginationParams, buildPaginationMeta } = require('../utils/pagination');
+const { recordAuditLog } = require('../utils/auditLog');
 
 const router = express.Router();
 
+const APPLICATION_XP = 25;
+const DEFAULT_PAGE_SIZE = 10;
+
+const runValidation = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array()
+    });
+  }
+  next();
+};
+
+/**
+ * @swagger
+ * tags:
+ *   name: Applications
+ *   description: Job applications submitted by students and reviewed by employers
+ */
+
+/**
+ * @swagger
+ * /applications:
+ *   get:
+ *     summary: List applications visible to the current user
+ *     description: >
+ *       Students see only their own applications; employers see applications
+ *       to companies they own or are a team member of; admins see all.
+ *     tags: [Applications]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
+ *     responses:
+ *       200:
+ *         description: A paginated list of applications
+ *       401:
+ *         description: Not authorized
+ */
 // @desc    Get all applications
 // @route   GET /api/applications
 // @access  Private
-router.get('/', protect, async (req, res) => {
+router.get('/', protect, async (req, res, next) => {
   try {
     const {
-      page = 1,
-      limit = 10,
       status,
       jobId,
       companyId,
@@ -24,16 +74,15 @@ router.get('/', protect, async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
+    const { page, limit, skip } = getPaginationParams(req.query, DEFAULT_PAGE_SIZE);
     const query = {};
 
-    // Filter by user role
     if (req.user.role === 'student') {
       query.applicant = req.user.id;
     } else if (req.user.role === 'employer') {
       query.company = { $in: await getCompanyIdsForUser(req.user.id) };
     }
 
-    // Apply additional filters
     if (status) query.status = status;
     if (jobId) query.job = jobId;
     if (companyId) query.company = companyId;
@@ -46,34 +95,26 @@ router.get('/', protect, async (req, res) => {
       .populate('applicant', 'firstName lastName email avatar skills')
       .populate('company', 'name logo industry')
       .sort(sort)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(limit)
+      .skip(skip);
 
     const total = await Application.countDocuments(query);
 
     res.json({
       success: true,
       count: applications.length,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total
-      },
+      pagination: buildPaginationMeta(page, limit, total),
       data: applications
     });
   } catch (error) {
-    console.error('Get applications error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Get single application
 // @route   GET /api/applications/:id
 // @access  Private
-router.get('/:id', protect, async (req, res) => {
+router.get('/:id', protect, async (req, res, next) => {
   try {
     const application = await Application.findById(req.params.id)
       .populate('job', 'title company category type level location salary requirements responsibilities')
@@ -88,10 +129,9 @@ router.get('/:id', protect, async (req, res) => {
       });
     }
 
-    // Check if user has permission to view this application
-    const canView = 
-      application.applicant.toString() === req.user.id ||
-      (req.user.role === 'employer' && await canUserViewApplication(req.user.id, application.company)) ||
+    const canView =
+      application.applicant._id.toString() === req.user.id ||
+      (req.user.role === 'employer' && await canUserViewApplication(req.user, application.company)) ||
       req.user.role === 'admin';
 
     if (!canView) {
@@ -106,34 +146,46 @@ router.get('/:id', protect, async (req, res) => {
       data: application
     });
   } catch (error) {
-    console.error('Get application error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
+/**
+ * @swagger
+ * /applications:
+ *   post:
+ *     summary: Submit an application to a job (students only)
+ *     tags: [Applications]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [jobId]
+ *             properties:
+ *               jobId: { type: string }
+ *               coverLetter: { type: string, maxLength: 2000 }
+ *     responses:
+ *       201:
+ *         description: Application submitted successfully
+ *       400:
+ *         description: Already applied, or job is not accepting applications
+ *       403:
+ *         description: Only students may apply to jobs
+ */
 // @desc    Create application
 // @route   POST /api/applications
 // @access  Private/Student
 router.post('/', protect, authorize('student'), [
   body('jobId').isMongoId().withMessage('Valid job ID is required'),
   body('coverLetter').optional().isLength({ max: 2000 }).withMessage('Cover letter cannot be more than 2000 characters')
-], async (req, res) => {
+], runValidation, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
     const { jobId, coverLetter, answers } = req.body;
 
-    // Check if job exists and is active
     const job = await Job.findById(jobId);
     if (!job) {
       return res.status(404).json({
@@ -149,7 +201,6 @@ router.post('/', protect, authorize('student'), [
       });
     }
 
-    // Check if user has already applied
     const existingApplication = await Application.findOne({
       job: jobId,
       applicant: req.user.id
@@ -162,10 +213,8 @@ router.post('/', protect, authorize('student'), [
       });
     }
 
-    // Get company
     const company = await Company.findById(job.company);
 
-    // Create application
     const application = await Application.create({
       job: jobId,
       applicant: req.user.id,
@@ -174,21 +223,17 @@ router.post('/', protect, authorize('student'), [
       answers: answers || []
     });
 
-    // Update job stats
     job.stats.applications += 1;
     await job.save();
 
-    // Update company stats
     company.stats.totalApplications += 1;
     await company.save();
 
-    // Update user stats
     const user = await User.findById(req.user.id);
     user.stats.applicationsSent += 1;
-    const xpResult = user.addXP(25);
+    const xpResult = user.addXP(APPLICATION_XP);
     await user.save();
 
-    // Create notification for company
     await Notification.create({
       user: company.owner,
       type: 'application_received',
@@ -211,16 +256,12 @@ router.post('/', protect, authorize('student'), [
       success: true,
       message: 'Application submitted successfully',
       data: populatedApplication,
-      xpGained: 25,
+      xpGained: APPLICATION_XP,
       leveledUp: xpResult.leveledUp,
       newLevel: xpResult.newLevel
     });
   } catch (error) {
-    console.error('Create application error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
@@ -234,17 +275,8 @@ router.put('/:id/status', protect, authorize('employer', 'admin'), [
     'offer-declined', 'rejected', 'withdrawn'
   ]).withMessage('Invalid status'),
   body('message').optional().isLength({ max: 500 }).withMessage('Message cannot be more than 500 characters')
-], async (req, res) => {
+], runValidation, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
     const application = await Application.findById(req.params.id);
     if (!application) {
       return res.status(404).json({
@@ -253,9 +285,8 @@ router.put('/:id/status', protect, authorize('employer', 'admin'), [
       });
     }
 
-    // Check if user has permission to update this application
-    const canUpdate = 
-      (req.user.role === 'employer' && await canUserViewApplication(req.user.id, application.company)) ||
+    const canUpdate =
+      (req.user.role === 'employer' && await canUserViewApplication(req.user, application.company)) ||
       req.user.role === 'admin';
 
     if (!canUpdate) {
@@ -266,7 +297,7 @@ router.put('/:id/status', protect, authorize('employer', 'admin'), [
     }
 
     const { status, message } = req.body;
-    const oldStatus = application.status;
+    const previousStatus = application.status;
 
     application.status = status;
     application.timeline.push({
@@ -278,7 +309,21 @@ router.put('/:id/status', protect, authorize('employer', 'admin'), [
 
     await application.save();
 
-    // Create notification for applicant
+    // Persisted audit trail (server/models/AuditLog.js) for a sensitive
+    // state transition: who changed a candidate's application status, from
+    // what, to what, and when. This is deliberately non-blocking — see
+    // server/utils/auditLog.js for why a logging failure must not fail the
+    // status update itself.
+    await recordAuditLog({
+      actorId: req.user.id,
+      action: 'application_status_changed',
+      targetType: 'Application',
+      targetId: application._id,
+      before: { status: previousStatus },
+      after: { status },
+      metadata: { message: message || null }
+    });
+
     await Notification.create({
       user: application.applicant,
       type: 'application_update',
@@ -303,11 +348,7 @@ router.put('/:id/status', protect, authorize('employer', 'admin'), [
       data: populatedApplication
     });
   } catch (error) {
-    console.error('Update application status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
@@ -317,17 +358,8 @@ router.put('/:id/status', protect, authorize('employer', 'admin'), [
 router.post('/:id/notes', protect, authorize('employer', 'admin'), [
   body('content').trim().notEmpty().withMessage('Note content is required'),
   body('isPrivate').optional().isBoolean().withMessage('isPrivate must be a boolean')
-], async (req, res) => {
+], runValidation, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
     const application = await Application.findById(req.params.id);
     if (!application) {
       return res.status(404).json({
@@ -336,9 +368,8 @@ router.post('/:id/notes', protect, authorize('employer', 'admin'), [
       });
     }
 
-    // Check if user has permission to add notes
-    const canAddNote = 
-      (req.user.role === 'employer' && await canUserViewApplication(req.user.id, application.company)) ||
+    const canAddNote =
+      (req.user.role === 'employer' && await canUserViewApplication(req.user, application.company)) ||
       req.user.role === 'admin';
 
     if (!canAddNote) {
@@ -367,11 +398,7 @@ router.post('/:id/notes', protect, authorize('employer', 'admin'), [
       data: populatedApplication.notes
     });
   } catch (error) {
-    console.error('Add note error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
@@ -383,17 +410,8 @@ router.post('/:id/interview', protect, authorize('employer', 'admin'), [
   body('interviewType').isIn(['phone', 'video', 'in-person', 'technical', 'panel', 'hr'])
     .withMessage('Invalid interview type'),
   body('duration').isInt({ min: 15, max: 480 }).withMessage('Duration must be between 15 and 480 minutes')
-], async (req, res) => {
+], runValidation, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
     const application = await Application.findById(req.params.id);
     if (!application) {
       return res.status(404).json({
@@ -402,9 +420,8 @@ router.post('/:id/interview', protect, authorize('employer', 'admin'), [
       });
     }
 
-    // Check if user has permission to schedule interview
-    const canSchedule = 
-      (req.user.role === 'employer' && await canUserViewApplication(req.user.id, application.company)) ||
+    const canSchedule =
+      (req.user.role === 'employer' && await canUserViewApplication(req.user, application.company)) ||
       req.user.role === 'admin';
 
     if (!canSchedule) {
@@ -449,7 +466,6 @@ router.post('/:id/interview', protect, authorize('employer', 'admin'), [
 
     await application.save();
 
-    // Create notification for applicant
     await Notification.create({
       user: application.applicant,
       type: 'interview_scheduled',
@@ -472,18 +488,14 @@ router.post('/:id/interview', protect, authorize('employer', 'admin'), [
       data: application.interview
     });
   } catch (error) {
-    console.error('Schedule interview error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Withdraw application
 // @route   PUT /api/applications/:id/withdraw
 // @access  Private/Student
-router.put('/:id/withdraw', protect, authorize('student'), async (req, res) => {
+router.put('/:id/withdraw', protect, authorize('student'), async (req, res, next) => {
   try {
     const application = await Application.findById(req.params.id);
     if (!application) {
@@ -493,7 +505,6 @@ router.put('/:id/withdraw', protect, authorize('student'), async (req, res) => {
       });
     }
 
-    // Check if user owns this application
     if (application.applicant.toString() !== req.user.id) {
       return res.status(403).json({
         success: false,
@@ -523,11 +534,7 @@ router.put('/:id/withdraw', protect, authorize('student'), async (req, res) => {
       message: 'Application withdrawn successfully'
     });
   } catch (error) {
-    console.error('Withdraw application error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
@@ -539,21 +546,13 @@ async function getCompanyIdsForUser(userId) {
       { 'team.user': userId }
     ]
   }).select('_id');
-  
+
   return companies.map(company => company._id);
 }
 
-async function canUserViewApplication(userId, companyId) {
+async function canUserViewApplication(user, companyId) {
   const company = await Company.findById(companyId);
-  if (!company) return false;
-
-  const isOwner = company.owner.toString() === userId;
-  const isTeamMember = company.team.some(member => 
-    member.user.toString() === userId && 
-    member.permissions.includes('view_applications')
-  );
-
-  return isOwner || isTeamMember;
+  return canManageCompany(company, user, 'view_applications');
 }
 
 module.exports = router;

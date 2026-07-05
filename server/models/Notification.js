@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { getPaginationParams, buildPaginationMeta } = require('../utils/pagination');
 
 const notificationSchema = new mongoose.Schema({
   user: {
@@ -192,10 +193,10 @@ notificationSchema.statics.createNotification = async function(data) {
   return notification;
 };
 
+const DEFAULT_NOTIFICATION_PAGE_SIZE = 20;
+
 notificationSchema.statics.getUserNotifications = async function(userId, options = {}) {
   const {
-    page = 1,
-    limit = 20,
     type,
     isRead,
     priority,
@@ -203,8 +204,9 @@ notificationSchema.statics.getUserNotifications = async function(userId, options
     sortOrder = 'desc'
   } = options;
 
+  const { page, limit, skip } = getPaginationParams(options, DEFAULT_NOTIFICATION_PAGE_SIZE);
   const query = { user: userId, isActive: true };
-  
+
   if (type) query.type = type;
   if (isRead !== undefined) query.isRead = isRead;
   if (priority) query.priority = priority;
@@ -214,8 +216,8 @@ notificationSchema.statics.getUserNotifications = async function(userId, options
 
   const notifications = await this.find(query)
     .sort(sort)
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
+    .limit(limit)
+    .skip(skip)
     .populate('data.jobId', 'title company')
     .populate('data.applicationId', 'status')
     .populate('data.companyId', 'name logo')
@@ -225,11 +227,7 @@ notificationSchema.statics.getUserNotifications = async function(userId, options
 
   return {
     notifications,
-    pagination: {
-      current: page,
-      pages: Math.ceil(total / limit),
-      total
-    }
+    pagination: buildPaginationMeta(page, limit, total)
   };
 };
 

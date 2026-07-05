@@ -1,19 +1,37 @@
 const User = require('../models/User');
+const { sanitizeSearchInput } = require('../utils/sanitize');
+const { getPaginationParams, buildPaginationMeta } = require('../utils/pagination');
+
+const DEFAULT_PAGE_SIZE = 10;
+const RESUME_UPLOAD_XP = 50;
+const ADD_SKILL_XP = 10;
+
+/**
+ * A user may act on a target user's resource if they are that user, or an
+ * admin. Centralized here (was previously duplicated inline across every
+ * handler in this file) so the rule only needs to change in one place.
+ */
+const canActOnUser = (requestUser, targetUserId) =>
+  requestUser.id === targetUserId || requestUser.role === 'admin';
 
 // @desc    Get all users
 // @route   GET /api/users
 // @access  Private/Admin
-const getUsers = async (req, res) => {
+const getUsers = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, role, search, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+    const { role, search, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+    const { page, limit, skip } = getPaginationParams(req.query, DEFAULT_PAGE_SIZE);
 
     const query = {};
     if (role) query.role = role;
-    if (search) {
+    // See server/utils/sanitize.js — same regex-injection/ReDoS mitigation
+    // applied to jobController/companyController search inputs.
+    const safeSearch = sanitizeSearchInput(search);
+    if (safeSearch) {
       query.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+        { firstName: { $regex: safeSearch, $options: 'i' } },
+        { lastName: { $regex: safeSearch, $options: 'i' } },
+        { email: { $regex: safeSearch, $options: 'i' } }
       ];
     }
 
@@ -23,37 +41,29 @@ const getUsers = async (req, res) => {
     const users = await User.find(query)
       .select('-password')
       .sort(sort)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(limit)
+      .skip(skip);
 
     const total = await User.countDocuments(query);
 
     res.json({
       success: true,
       count: users.length,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total
-      },
+      pagination: buildPaginationMeta(page, limit, total),
       data: users
     });
   } catch (error) {
-    console.error('Get users error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Get single user
 // @route   GET /api/users/:id
 // @access  Private
-const getUser = async (req, res) => {
+const getUser = async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id).select('-password');
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -61,7 +71,6 @@ const getUser = async (req, res) => {
       });
     }
 
-    // Increment profile views if viewing someone else's profile
     if (req.user.id !== req.params.id) {
       user.stats.profileViews += 1;
       await user.save();
@@ -72,21 +81,16 @@ const getUser = async (req, res) => {
       data: user
     });
   } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Update user profile
 // @route   PUT /api/users/:id
 // @access  Private
-const updateUser = async (req, res) => {
+const updateUser = async (req, res, next) => {
   try {
-    // Check if user is updating their own profile or is admin
-    if (req.user.id !== req.params.id && req.user.role !== 'admin') {
+    if (!canActOnUser(req.user, req.params.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this profile'
@@ -102,8 +106,8 @@ const updateUser = async (req, res) => {
     }
 
     const allowedUpdates = [
-      'firstName', 'lastName', 'bio', 'location', 'phone', 
-      'website', 'linkedin', 'github', 'skills', 'experience', 
+      'firstName', 'lastName', 'bio', 'location', 'phone',
+      'website', 'linkedin', 'github', 'skills', 'experience',
       'education', 'portfolio', 'preferences'
     ];
 
@@ -126,20 +130,16 @@ const updateUser = async (req, res) => {
       data: updatedUser
     });
   } catch (error) {
-    console.error('Update user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Upload avatar
 // @route   POST /api/users/:id/avatar
 // @access  Private
-const uploadAvatar = async (req, res) => {
+const uploadAvatar = async (req, res, next) => {
   try {
-    if (req.user.id !== req.params.id && req.user.role !== 'admin') {
+    if (!canActOnUser(req.user, req.params.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this profile'
@@ -172,20 +172,16 @@ const uploadAvatar = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Upload avatar error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Upload resume
 // @route   POST /api/users/:id/resume
 // @access  Private
-const uploadResume = async (req, res) => {
+const uploadResume = async (req, res, next) => {
   try {
-    if (req.user.id !== req.params.id && req.user.role !== 'admin') {
+    if (!canActOnUser(req.user, req.params.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this profile'
@@ -212,10 +208,8 @@ const uploadResume = async (req, res) => {
       filename: req.file.originalname,
       uploadedAt: new Date()
     };
-    await user.save();
 
-    // Add XP for uploading resume
-    const xpResult = user.addXP(50);
+    const xpResult = user.addXP(RESUME_UPLOAD_XP);
     await user.save();
 
     res.json({
@@ -223,26 +217,22 @@ const uploadResume = async (req, res) => {
       message: 'Resume uploaded successfully',
       data: {
         resume: user.resume,
-        xpGained: 50,
+        xpGained: RESUME_UPLOAD_XP,
         leveledUp: xpResult.leveledUp,
         newLevel: xpResult.newLevel
       }
     });
   } catch (error) {
-    console.error('Upload resume error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Add skill
 // @route   POST /api/users/:id/skills
 // @access  Private
-const addSkill = async (req, res) => {
+const addSkill = async (req, res, next) => {
   try {
-    if (req.user.id !== req.params.id && req.user.role !== 'admin') {
+    if (!canActOnUser(req.user, req.params.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this profile'
@@ -259,8 +249,7 @@ const addSkill = async (req, res) => {
 
     const { name, level = 'beginner' } = req.body;
 
-    // Check if skill already exists
-    const existingSkill = user.skills.find(skill => 
+    const existingSkill = user.skills.find(skill =>
       skill.name.toLowerCase() === name.toLowerCase()
     );
 
@@ -272,35 +261,28 @@ const addSkill = async (req, res) => {
     }
 
     user.skills.push({ name, level });
-    await user.save();
-
-    // Add XP for adding skill
-    const xpResult = user.addXP(10);
+    const xpResult = user.addXP(ADD_SKILL_XP);
     await user.save();
 
     res.json({
       success: true,
       message: 'Skill added successfully',
       data: user.skills,
-      xpGained: 10,
+      xpGained: ADD_SKILL_XP,
       leveledUp: xpResult.leveledUp,
       newLevel: xpResult.newLevel
     });
   } catch (error) {
-    console.error('Add skill error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Update skill
 // @route   PUT /api/users/:id/skills/:skillId
 // @access  Private
-const updateSkill = async (req, res) => {
+const updateSkill = async (req, res, next) => {
   try {
-    if (req.user.id !== req.params.id && req.user.role !== 'admin') {
+    if (!canActOnUser(req.user, req.params.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this profile'
@@ -332,20 +314,16 @@ const updateSkill = async (req, res) => {
       data: skill
     });
   } catch (error) {
-    console.error('Update skill error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Delete skill
 // @route   DELETE /api/users/:id/skills/:skillId
 // @access  Private
-const deleteSkill = async (req, res) => {
+const deleteSkill = async (req, res, next) => {
   try {
-    if (req.user.id !== req.params.id && req.user.role !== 'admin') {
+    if (!canActOnUser(req.user, req.params.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this profile'
@@ -368,7 +346,13 @@ const deleteSkill = async (req, res) => {
       });
     }
 
-    skill.remove();
+    // WHY `.deleteOne()` and not `.remove()`: Mongoose 7 removed
+    // `Document#remove()` entirely (including on array subdocuments) —
+    // `.remove()` here threw "skill.remove is not a function" on every
+    // call, meaning this endpoint could never actually succeed. `.deleteOne()`
+    // is the Mongoose 7+ replacement and correctly pulls this subdocument
+    // out of the parent `skills` array.
+    skill.deleteOne();
     await user.save();
 
     res.json({
@@ -377,18 +361,14 @@ const deleteSkill = async (req, res) => {
       data: user.skills
     });
   } catch (error) {
-    console.error('Delete skill error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Get user stats
 // @route   GET /api/users/:id/stats
 // @access  Private
-const getUserStats = async (req, res) => {
+const getUserStats = async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id).select('stats');
     if (!user) {
@@ -403,21 +383,16 @@ const getUserStats = async (req, res) => {
       data: user.stats
     });
   } catch (error) {
-    console.error('Get user stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Delete user
 // @route   DELETE /api/users/:id
 // @access  Private/Admin
-const deleteUser = async (req, res) => {
+const deleteUser = async (req, res, next) => {
   try {
-    // Only allow users to delete their own account or admin to delete any account
-    if (req.user.id !== req.params.id && req.user.role !== 'admin') {
+    if (!canActOnUser(req.user, req.params.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to delete this account'
@@ -439,11 +414,7 @@ const deleteUser = async (req, res) => {
       message: 'User deleted successfully'
     });
   } catch (error) {
-    console.error('Delete user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
@@ -459,4 +430,3 @@ module.exports = {
   getUserStats,
   deleteUser
 };
-
