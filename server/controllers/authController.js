@@ -1,13 +1,12 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
 const { sendEmail } = require('../utils/sendEmail');
+const logger = require('../utils/logger');
 
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public
-const register = async (req, res) => {
+const register = async (req, res, next) => {
   try {
     const { firstName, lastName, email, password, role = 'student' } = req.body;
 
@@ -29,14 +28,33 @@ const register = async (req, res) => {
       role
     });
 
-    // Generate email verification token
+    // Generate email verification token and persist it. This save() call is
+    // exactly the scenario the password-double-hashing bug (fixed in
+    // User.js's pre('save') hook) used to corrupt: without the `return`
+    // before the early-exit `next()`, this second save() would silently
+    // re-hash the already-hashed password from User.create() above.
     const verificationToken = crypto.randomBytes(20).toString('hex');
     user.emailVerificationToken = verificationToken;
     await user.save();
 
-    // Send verification email
+    // Send verification email. Email delivery failures must not fail
+    // registration itself — the account is already created and usable via
+    // the JWT issued below, so we log and continue rather than surfacing a
+    // 500 to a user whose registration actually succeeded. This is
+    // deliberately NOT awaited: sendEmail() makes a real network call to
+    // an external SMTP server (see server/utils/sendEmail.js), and with no
+    // real EMAIL_* credentials configured (or even with real ones, under
+    // slow/unreliable network conditions) that call's latency is
+    // unbounded and observed in practice to range from ~1s to 20s+ for
+    // the same bad-credentials failure. Awaiting it here means the
+    // register HTTP response — and therefore the client's login/register
+    // redirect to /dashboard — is held hostage by that external call's
+    // latency even though its outcome has zero bearing on whether
+    // registration succeeded. Firing it and handling the rejection
+    // out-of-band keeps the response fast and deterministic while
+    // preserving the existing log-and-continue behavior on failure.
     const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${verificationToken}`;
-    await sendEmail({
+    sendEmail({
       email: user.email,
       subject: 'Verify your SkillBridge account',
       template: 'emailVerification',
@@ -44,9 +62,10 @@ const register = async (req, res) => {
         firstName: user.firstName,
         verificationUrl
       }
+    }).catch((emailError) => {
+      logger.error('Registration email send failed', { error: emailError.message, stack: emailError.stack });
     });
 
-    // Generate JWT token
     const token = user.getSignedJwtToken();
 
     res.status(201).json({
@@ -64,22 +83,17 @@ const register = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during registration'
-    });
+    next(error);
   }
 };
 
 // @desc    Login user
 // @route   POST /api/auth/login
 // @access  Public
-const login = async (req, res) => {
+const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
-    // Check for user
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
       return res.status(401).json({
@@ -88,7 +102,6 @@ const login = async (req, res) => {
       });
     }
 
-    // Check if password matches
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return res.status(401).json({
@@ -97,11 +110,9 @@ const login = async (req, res) => {
       });
     }
 
-    // Update last login
     user.lastLogin = new Date();
     await user.save();
 
-    // Generate JWT token
     const token = user.getSignedJwtToken();
 
     res.json({
@@ -120,21 +131,24 @@ const login = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during login'
-    });
+    next(error);
   }
 };
 
 // @desc    Get current user
 // @route   GET /api/auth/me
 // @access  Private
-const getMe = async (req, res) => {
+const getMe = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);
-    
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
     res.json({
       success: true,
       user: {
@@ -163,18 +177,14 @@ const getMe = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 };
 
 // @desc    Verify email
 // @route   GET /api/auth/verify-email
 // @access  Public
-const verifyEmail = async (req, res) => {
+const verifyEmail = async (req, res, next) => {
   try {
     const { token } = req.query;
 
@@ -202,18 +212,14 @@ const verifyEmail = async (req, res) => {
       message: 'Email verified successfully'
     });
   } catch (error) {
-    console.error('Email verification error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during email verification'
-    });
+    next(error);
   }
 };
 
 // @desc    Forgot password
 // @route   POST /api/auth/forgot-password
 // @access  Public
-const forgotPassword = async (req, res) => {
+const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
 
@@ -225,15 +231,17 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    // Generate reset token
     const resetToken = crypto.randomBytes(20).toString('hex');
     user.passwordResetToken = resetToken;
     user.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
     await user.save();
 
-    // Send reset email
+    // Not awaited — see the identical rationale on the register() email
+    // send above: this is a real external SMTP call with unbounded
+    // latency, and the outcome of sending the notification email has no
+    // bearing on whether the password-reset token itself was issued.
     const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
-    await sendEmail({
+    sendEmail({
       email: user.email,
       subject: 'Reset your SkillBridge password',
       template: 'passwordReset',
@@ -241,6 +249,8 @@ const forgotPassword = async (req, res) => {
         firstName: user.firstName,
         resetUrl
       }
+    }).catch((emailError) => {
+      logger.error('Forgot-password email send failed', { error: emailError.message, stack: emailError.stack });
     });
 
     res.json({
@@ -248,18 +258,14 @@ const forgotPassword = async (req, res) => {
       message: 'Password reset email sent'
     });
   } catch (error) {
-    console.error('Forgot password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during password reset'
-    });
+    next(error);
   }
 };
 
 // @desc    Reset password
 // @route   POST /api/auth/reset-password
 // @access  Public
-const resetPassword = async (req, res) => {
+const resetPassword = async (req, res, next) => {
   try {
     const { token, password } = req.body;
 
@@ -285,24 +291,25 @@ const resetPassword = async (req, res) => {
       message: 'Password reset successful'
     });
   } catch (error) {
-    console.error('Reset password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during password reset'
-    });
+    next(error);
   }
 };
 
 // @desc    Update password
 // @route   PUT /api/auth/update-password
 // @access  Private
-const updatePassword = async (req, res) => {
+const updatePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
     const user = await User.findById(req.user.id).select('+password');
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
 
-    // Check current password
     const isMatch = await user.matchPassword(currentPassword);
     if (!isMatch) {
       return res.status(400).json({
@@ -319,30 +326,24 @@ const updatePassword = async (req, res) => {
       message: 'Password updated successfully'
     });
   } catch (error) {
-    console.error('Update password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during password update'
-    });
+    next(error);
   }
 };
 
 // @desc    Logout user
 // @route   POST /api/auth/logout
 // @access  Private
-const logout = async (req, res) => {
+const logout = async (req, res, next) => {
   try {
-    // In a more sophisticated setup, you might want to blacklist the token
+    // Stateless JWT auth: there is no server-side session to destroy. A
+    // token-blacklist (e.g. short-lived tokens + a revocation store) would
+    // be required for true server-side logout; out of scope for this pass.
     res.json({
       success: true,
       message: 'Logout successful'
     });
   } catch (error) {
-    console.error('Logout error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during logout'
-    });
+    next(error);
   }
 };
 
@@ -356,4 +357,3 @@ module.exports = {
   updatePassword,
   logout
 };
-

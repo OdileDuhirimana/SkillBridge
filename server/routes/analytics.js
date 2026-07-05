@@ -10,7 +10,7 @@ const router = express.Router();
 // @desc    Get user analytics
 // @route   GET /api/analytics/user
 // @access  Private
-router.get('/user', protect, async (req, res) => {
+router.get('/user', protect, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { period = '30d' } = req.query;
@@ -36,14 +36,26 @@ router.get('/user', protect, async (req, res) => {
         startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     }
 
-    // Get user stats
-    const user = await User.findById(userId).select('stats');
+    // Get user stats. WHY both fields are selected: this handler also
+    // reads `user.skills` below (to build the `skills.userSkills` response
+    // field) — selecting only 'stats' left `user.skills` `undefined`,
+    // crashing every call to this endpoint with `TypeError: Cannot read
+    // properties of undefined (reading 'map')` at the `user.skills.map(...)`
+    // line below, since a real user document always has other fields
+    // excluded once `.select()` is used with any field list.
+    const user = await User.findById(userId).select('stats skills');
     
-    // Get applications data
+    // Get applications data. WHY `skills` is in the `job` populate select:
+    // the "Skills analysis" section below reads `app.job.skills` for every
+    // application to build the frequency table across all applied-to jobs
+    // — omitting it here left `app.job.skills` `undefined` for every job,
+    // crashing with `TypeError: Cannot read properties of undefined
+    // (reading 'map')` inside the `flatMap` call below (the same bug class
+    // as the `user.skills` selection fix directly above).
     const applications = await Application.find({
       applicant: userId,
       createdAt: { $gte: startDate }
-    }).populate('job', 'title category type level company')
+    }).populate('job', 'title category type level company skills')
       .populate('company', 'name industry');
 
     // Application status distribution
@@ -141,18 +153,14 @@ router.get('/user', protect, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get user analytics error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Get company analytics
 // @route   GET /api/analytics/company
 // @access  Private/Employer
-router.get('/company', protect, authorize('employer', 'admin'), async (req, res) => {
+router.get('/company', protect, authorize('employer', 'admin'), async (req, res, next) => {
   try {
     const { companyId, period = '30d' } = req.query;
 
@@ -321,18 +329,14 @@ router.get('/company', protect, authorize('employer', 'admin'), async (req, res)
       }
     });
   } catch (error) {
-    console.error('Get company analytics error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Get platform analytics
 // @route   GET /api/analytics/platform
 // @access  Private/Admin
-router.get('/platform', protect, authorize('admin'), async (req, res) => {
+router.get('/platform', protect, authorize('admin'), async (req, res, next) => {
   try {
     const { period = '30d' } = req.query;
 
@@ -475,11 +479,7 @@ router.get('/platform', protect, authorize('admin'), async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get platform analytics error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 

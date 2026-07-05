@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Chat = require('../models/Chat');
 const Notification = require('../models/Notification');
 const { sendPushNotification, createNotificationPayload } = require('../utils/pushNotifications');
+const logger = require('../utils/logger');
 
 // Store active connections
 const activeConnections = new Map();
@@ -28,13 +29,13 @@ const setupSocketHandlers = (io) => {
       socket.user = user;
       next();
     } catch (error) {
-      console.error('Socket authentication error:', error);
+      logger.error('Socket authentication error', { error: error.message });
       next(new Error('Authentication error: Invalid token'));
     }
   });
 
   io.on('connection', (socket) => {
-    console.log(`User ${socket.user.firstName} connected with socket ${socket.id}`);
+    logger.info('Socket connected', { userId: socket.userId, socketId: socket.id });
     
     // Store connection
     activeConnections.set(socket.userId, socket.id);
@@ -68,7 +69,7 @@ const setupSocketHandlers = (io) => {
         chat.updateLastSeen(socket.userId);
         await chat.save();
       } catch (error) {
-        console.error('Join chat error:', error);
+        logger.error('Join chat error', { error: error.message, stack: error.stack, userId: socket.userId });
         socket.emit('error', { message: 'Error joining chat' });
       }
     });
@@ -122,10 +123,12 @@ const setupSocketHandlers = (io) => {
 
         await chat.save();
 
-        // Populate message data
+        // Populate message data. Note: `messages.replyTo` is intentionally
+        // not populated — see the doc comment on `messageSchema.replyTo` in
+        // server/models/Chat.js (embedded subdocument reference, not a
+        // separate collection; would throw MissingSchemaError).
         const populatedMessage = await Chat.findById(chat._id)
           .populate('messages.sender', 'firstName lastName avatar')
-          .populate('messages.replyTo')
           .then(chat => chat.messages[chat.messages.length - 1]);
 
         // Emit message to all participants in the chat
@@ -153,13 +156,13 @@ const setupSocketHandlers = (io) => {
                   await sendPushNotification(participantUser.fcmToken, notification);
                 }
               } catch (error) {
-                console.error('Push notification error:', error);
+                logger.error('Push notification error', { error: error.message, stack: error.stack });
               }
             }
           }
         }
       } catch (error) {
-        console.error('Send message error:', error);
+        logger.error('Send message error', { error: error.message, stack: error.stack, userId: socket.userId });
         socket.emit('error', { message: 'Error sending message' });
       }
     });
@@ -216,7 +219,7 @@ const setupSocketHandlers = (io) => {
           }
         });
       } catch (error) {
-        console.error('Add reaction error:', error);
+        logger.error('Add reaction error', { error: error.message, stack: error.stack, userId: socket.userId });
         socket.emit('error', { message: 'Error adding reaction' });
       }
     });
@@ -249,7 +252,7 @@ const setupSocketHandlers = (io) => {
           messageIds
         });
       } catch (error) {
-        console.error('Mark messages read error:', error);
+        logger.error('Mark messages read error', { error: error.message, stack: error.stack, userId: socket.userId });
         socket.emit('error', { message: 'Error marking messages as read' });
       }
     });
@@ -290,11 +293,11 @@ const setupSocketHandlers = (io) => {
               await sendPushNotification(applicant.fcmToken, notification);
             }
           } catch (error) {
-            console.error('Push notification error:', error);
+            logger.error('Push notification error', { error: error.message, stack: error.stack });
           }
         }
       } catch (error) {
-        console.error('Application status change error:', error);
+        logger.error('Application status change error', { error: error.message, stack: error.stack });
       }
     });
 
@@ -321,18 +324,18 @@ const setupSocketHandlers = (io) => {
               
               await sendPushNotification(follower.fcmToken, notification);
             } catch (error) {
-              console.error('Push notification error:', error);
+              logger.error('Push notification error', { error: error.message, stack: error.stack });
             }
           }
         }
       } catch (error) {
-        console.error('New job notification error:', error);
+        logger.error('New job notification error', { error: error.message, stack: error.stack });
       }
     });
 
     // Handle disconnect
     socket.on('disconnect', () => {
-      console.log(`User ${socket.user.firstName} disconnected`);
+      logger.info('Socket disconnected', { userId: socket.userId });
       activeConnections.delete(socket.userId);
       
       // Emit offline status
@@ -344,7 +347,7 @@ const setupSocketHandlers = (io) => {
 
     // Handle errors
     socket.on('error', (error) => {
-      console.error('Socket error:', error);
+      logger.error('Socket error', { error: error.message || error, userId: socket.userId });
     });
   });
 

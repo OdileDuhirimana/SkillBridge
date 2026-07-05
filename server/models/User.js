@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+// Named constants replace previously inlined "magic numbers" so the values
+// have a single, documented source of truth and are easy to tune later.
+const BCRYPT_SALT_ROUNDS = 10;
+const XP_PER_LEVEL = 100;
+
 const userSchema = new mongoose.Schema({
   firstName: {
     type: String,
@@ -228,13 +233,18 @@ const userSchema = new mongoose.Schema({
 });
 
 // Encrypt password using bcrypt
+// NOTE: the early-return `next()` MUST be preceded by `return` — without it,
+// execution falls through and re-hashes an already-hashed password on every
+// subsequent save() call (e.g. the second save() in the register flow that
+// persists emailVerificationToken), corrupting matchPassword() permanently.
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) {
-    next();
+    return next();
   }
 
-  const salt = await bcrypt.genSalt(10);
+  const salt = await bcrypt.genSalt(BCRYPT_SALT_ROUNDS);
   this.password = await bcrypt.hash(this.password, salt);
+  next();
 });
 
 // Sign JWT and return
@@ -252,9 +262,9 @@ userSchema.methods.matchPassword = async function(enteredPassword) {
 // Calculate XP and level
 userSchema.methods.addXP = function(points) {
   this.stats.xp += points;
-  
-  // Level up calculation (100 XP per level, exponential growth)
-  const newLevel = Math.floor(this.stats.xp / 100) + 1;
+
+  // Level up calculation (XP_PER_LEVEL XP per level)
+  const newLevel = Math.floor(this.stats.xp / XP_PER_LEVEL) + 1;
   if (newLevel > this.stats.level) {
     this.stats.level = newLevel;
     return { leveledUp: true, newLevel };

@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { protect, authorize } = require('../middleware/auth');
-const { upload } = require('../utils/upload');
+const { upload, handleUploadError } = require('../utils/upload');
 const {
   getCompanies,
   getCompany,
@@ -22,6 +22,20 @@ const router = express.Router();
 // @route   GET /api/companies
 // @access  Public
 router.get('/', getCompanies);
+
+// WHY this is registered before `GET /:id`: Express matches routes in
+// registration order, and `/:id` matches any single path segment —
+// including the literal segment `industries`. This was previously
+// registered AFTER `GET /:id`, so `GET /api/companies/industries` was
+// actually handled by the `/:id` route with `id = 'industries'`, which
+// fails Mongoose's ObjectId cast and surfaces as an unrelated 404 instead
+// of the industries list. Same bug class as server/routes/jobs.js and
+// server/routes/notifications.js.
+
+// @desc    Get company industries
+// @route   GET /api/companies/industries
+// @access  Public
+router.get('/industries', getCompanyIndustries);
 
 // @desc    Get single company
 // @route   GET /api/companies/:id
@@ -75,7 +89,13 @@ router.put('/:id', protect, [
 // @desc    Upload company logo
 // @route   POST /api/companies/:id/logo
 // @access  Private/Employer
-router.post('/:id/logo', protect, upload.single('logo'), uploadLogo);
+//
+// WHY `handleUploadError` follows `upload.single(...)`: see the identical
+// rationale in server/routes/users.js — without it, a rejected file
+// (wrong type/too large) reaches the generic error handler as a plain
+// `Error` and gets misreported as a 500 instead of the 400
+// `handleUploadError` produces.
+router.post('/:id/logo', protect, upload.single('logo'), handleUploadError, uploadLogo);
 
 // @desc    Add team member
 // @route   POST /api/companies/:id/team
@@ -83,7 +103,15 @@ router.post('/:id/logo', protect, upload.single('logo'), uploadLogo);
 router.post('/:id/team', protect, [
   body('userId').isMongoId().withMessage('Valid user ID is required'),
   body('role').trim().notEmpty().withMessage('Role is required'),
-  body('permissions').isArray().withMessage('Permissions must be an array')
+  // WHY `.optional()`: `Company.team.permissions` (see
+  // server/models/Company.js) is a plain array field with no `required`
+  // flag — Mongoose defaults it to `[]` when omitted, exactly like adding
+  // a teammate by role alone and letting them pick up default/no extra
+  // permissions is meant to work. Without `.optional()` here, every such
+  // request (permissions is a reasonable field to omit, not an edge case)
+  // was rejected with a 400 "Permissions must be an array" even though
+  // the field is genuinely optional everywhere else in the stack.
+  body('permissions').optional().isArray().withMessage('Permissions must be an array')
 ], (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -124,11 +152,6 @@ router.post('/:id/reviews', protect, [
 // @route   GET /api/companies/:id/reviews
 // @access  Public
 router.get('/:id/reviews', getCompanyReviews);
-
-// @desc    Get company industries
-// @route   GET /api/companies/industries
-// @access  Public
-router.get('/industries', getCompanyIndustries);
 
 // @desc    Follow/Unfollow company
 // @route   POST /api/companies/:id/follow

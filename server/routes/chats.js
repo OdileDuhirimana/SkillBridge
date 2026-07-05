@@ -3,16 +3,22 @@ const { body, validationResult } = require('express-validator');
 const Chat = require('../models/Chat');
 const User = require('../models/User');
 const Application = require('../models/Application');
+const Company = require('../models/Company');
 const { protect } = require('../middleware/auth');
+const { canManageCompany } = require('../utils/authorization');
+const { getPaginationParams, buildPaginationMeta } = require('../utils/pagination');
+
+const DEFAULT_CHAT_PAGE_SIZE = 20;
 
 const router = express.Router();
 
 // @desc    Get user chats
 // @route   GET /api/chats
 // @access  Private
-router.get('/', protect, async (req, res) => {
+router.get('/', protect, async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, type } = req.query;
+    const { type } = req.query;
+    const { page, limit, skip } = getPaginationParams(req.query, DEFAULT_CHAT_PAGE_SIZE);
 
     const query = {
       'participants.user': req.user.id,
@@ -21,50 +27,49 @@ router.get('/', protect, async (req, res) => {
 
     if (type) query.type = type;
 
+    // Note: `lastMessage` is intentionally NOT populated here — it is not a
+    // reference into a separate collection but an id into this document's
+    // own embedded `messages` array. Use the `lastMessagePreview` virtual
+    // (server/models/Chat.js) to read the actual message content; a
+    // populate call against it would throw (see model comment for why).
     const chats = await Chat.find(query)
       .populate('participants.user', 'firstName lastName avatar')
       .populate('application', 'status job')
       .populate('job', 'title company')
       .populate('company', 'name logo')
-      .populate('lastMessage')
       .sort({ updatedAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(limit)
+      .skip(skip);
 
     const total = await Chat.countDocuments(query);
 
     res.json({
       success: true,
       count: chats.length,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total
-      },
+      pagination: buildPaginationMeta(page, limit, total),
       data: chats
     });
   } catch (error) {
-    console.error('Get chats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Get single chat
 // @route   GET /api/chats/:id
 // @access  Private
-router.get('/:id', protect, async (req, res) => {
+router.get('/:id', protect, async (req, res, next) => {
   try {
+    // Note: neither `lastMessage` nor `messages.replyTo` is populated — both
+    // address entries in this document's own embedded `messages` array, not
+    // a separate collection. Use the `lastMessagePreview` / `replyToPreview`
+    // virtuals (server/models/Chat.js) instead; populating either would
+    // throw `MissingSchemaError`.
     const chat = await Chat.findById(req.params.id)
       .populate('participants.user', 'firstName lastName avatar')
       .populate('application', 'status job')
       .populate('job', 'title company')
       .populate('company', 'name logo')
-      .populate('messages.sender', 'firstName lastName avatar')
-      .populate('messages.replyTo')
-      .populate('lastMessage');
+      .populate('messages.sender', 'firstName lastName avatar');
 
     if (!chat) {
       return res.status(404).json({
@@ -73,9 +78,20 @@ router.get('/:id', protect, async (req, res) => {
       });
     }
 
-    // Check if user is a participant
+    // Check if user is a participant.
+    //
+    // WHY `(participant.user._id || participant.user)`: the query above
+    // populates `participants.user`, so by this point each entry's `user`
+    // field holds a full populated User document, not a raw ObjectId.
+    // Calling `.toString()` directly on that document does NOT yield the
+    // hex id string (it falls through to `Object.prototype.toString`,
+    // i.e. "[object Object]") — comparing that against `req.user.id`
+    // silently failed for every real participant, a genuine authorization
+    // bug that made this endpoint 403 even the chat's own participants.
+    // Falling back to `.user` unpopulated (a plain ObjectId) keeps this
+    // correct even if the populate above is ever removed.
     const isParticipant = chat.participants.some(
-      participant => participant.user.toString() === req.user.id
+      (participant) => (participant.user._id || participant.user).toString() === req.user.id
     );
 
     if (!isParticipant) {
@@ -94,11 +110,7 @@ router.get('/:id', protect, async (req, res) => {
       data: chat
     });
   } catch (error) {
-    console.error('Get chat error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
@@ -109,7 +121,7 @@ router.post('/', protect, [
   body('participants').isArray({ min: 1 }).withMessage('At least one participant is required'),
   body('type').isIn(['direct', 'group', 'application']).withMessage('Invalid chat type'),
   body('title').optional().isLength({ max: 100 }).withMessage('Title cannot be more than 100 characters')
-], async (req, res) => {
+], async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -152,9 +164,9 @@ router.post('/', protect, [
       }
 
       // Check if user has access to this application
-      const hasAccess = 
+      const hasAccess =
         application.applicant.toString() === req.user.id ||
-        (req.user.role === 'employer' && await canUserViewApplication(req.user.id, application.company));
+        (req.user.role === 'employer' && await canUserViewApplication(req.user, application.company));
 
       if (!hasAccess) {
         return res.status(403).json({
@@ -186,11 +198,7 @@ router.post('/', protect, [
       data: populatedChat
     });
   } catch (error) {
-    console.error('Create chat error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
@@ -200,7 +208,7 @@ router.post('/', protect, [
 router.post('/:id/messages', protect, [
   body('content').trim().notEmpty().withMessage('Message content is required'),
   body('type').optional().isIn(['text', 'image', 'file', 'system']).withMessage('Invalid message type')
-], async (req, res) => {
+], async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -254,9 +262,11 @@ router.post('/:id/messages', protect, [
 
     await chat.save();
 
+    // Note: `messages.replyTo` is not populated here — see the model
+    // comment on `messageSchema.replyTo` for why (embedded subdocument
+    // reference, not a separate collection; use `replyToPreview` instead).
     const populatedMessage = await Chat.findById(chat._id)
       .populate('messages.sender', 'firstName lastName avatar')
-      .populate('messages.replyTo')
       .then(chat => chat.messages[chat.messages.length - 1]);
 
     res.status(201).json({
@@ -265,18 +275,14 @@ router.post('/:id/messages', protect, [
       data: populatedMessage
     });
   } catch (error) {
-    console.error('Send message error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Mark messages as read
 // @route   PUT /api/chats/:id/read
 // @access  Private
-router.put('/:id/read', protect, async (req, res) => {
+router.put('/:id/read', protect, async (req, res, next) => {
   try {
     const chat = await Chat.findById(req.params.id);
     if (!chat) {
@@ -309,11 +315,7 @@ router.put('/:id/read', protect, async (req, res) => {
       message: 'Messages marked as read'
     });
   } catch (error) {
-    console.error('Mark messages as read error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
@@ -322,7 +324,7 @@ router.put('/:id/read', protect, async (req, res) => {
 // @access  Private
 router.post('/:id/messages/:messageId/reactions', protect, [
   body('emoji').trim().notEmpty().withMessage('Emoji is required')
-], async (req, res) => {
+], async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -372,18 +374,14 @@ router.post('/:id/messages/:messageId/reactions', protect, [
       data: message.reactions
     });
   } catch (error) {
-    console.error('Add reaction error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Remove reaction from message
 // @route   DELETE /api/chats/:id/messages/:messageId/reactions
 // @access  Private
-router.delete('/:id/messages/:messageId/reactions', protect, async (req, res) => {
+router.delete('/:id/messages/:messageId/reactions', protect, async (req, res, next) => {
   try {
     const chat = await Chat.findById(req.params.id);
     if (!chat) {
@@ -422,11 +420,7 @@ router.delete('/:id/messages/:messageId/reactions', protect, async (req, res) =>
       data: message.reactions
     });
   } catch (error) {
-    console.error('Remove reaction error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
@@ -436,7 +430,7 @@ router.delete('/:id/messages/:messageId/reactions', protect, async (req, res) =>
 router.post('/:id/participants', protect, [
   body('userId').isMongoId().withMessage('Valid user ID is required'),
   body('role').optional().isIn(['applicant', 'recruiter', 'admin']).withMessage('Invalid role')
-], async (req, res) => {
+], async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -490,18 +484,14 @@ router.post('/:id/participants', protect, [
       data: populatedChat.participants
     });
   } catch (error) {
-    console.error('Add participant error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Remove participant from chat
 // @route   DELETE /api/chats/:id/participants/:participantId
 // @access  Private
-router.delete('/:id/participants/:participantId', protect, async (req, res) => {
+router.delete('/:id/participants/:participantId', protect, async (req, res, next) => {
   try {
     const chat = await Chat.findById(req.params.id);
     if (!chat) {
@@ -539,18 +529,14 @@ router.delete('/:id/participants/:participantId', protect, async (req, res) => {
       message: 'Participant removed successfully'
     });
   } catch (error) {
-    console.error('Remove participant error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // @desc    Archive chat
 // @route   PUT /api/chats/:id/archive
 // @access  Private
-router.put('/:id/archive', protect, async (req, res) => {
+router.put('/:id/archive', protect, async (req, res, next) => {
   try {
     const chat = await Chat.findById(req.params.id);
     if (!chat) {
@@ -583,27 +569,14 @@ router.put('/:id/archive', protect, async (req, res) => {
       message: 'Chat archived successfully'
     });
   } catch (error) {
-    console.error('Archive chat error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    next(error);
   }
 });
 
 // Helper function
-async function canUserViewApplication(userId, companyId) {
-  const Company = require('../models/Company');
+async function canUserViewApplication(user, companyId) {
   const company = await Company.findById(companyId);
-  if (!company) return false;
-
-  const isOwner = company.owner.toString() === userId;
-  const isTeamMember = company.team.some(member => 
-    member.user.toString() === userId && 
-    member.permissions.includes('view_applications')
-  );
-
-  return isOwner || isTeamMember;
+  return canManageCompany(company, user, 'view_applications');
 }
 
 module.exports = router;

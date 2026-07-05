@@ -399,6 +399,15 @@ const seedJobs = async (companies) => {
     for (let i = 0; i < sampleJobs.length; i++) {
       const jobData = {
         ...sampleJobs[i],
+        // `Job.status` defaults to 'draft' (see server/models/Job.js) and
+        // none of the sampleJobs entries above set it explicitly. Every
+        // public listing/search endpoint filters on `status: 'active'`
+        // (see buildJobQuery in server/controllers/jobController.js), so
+        // without this the seeded jobs are created successfully but are
+        // permanently invisible on the jobs page, dashboard "Latest Jobs"
+        // widget, and search — the seed script would silently produce a
+        // demo database that looks empty everywhere a real user looks.
+        status: 'active',
         company: companies[i % companies.length]._id,
         postedBy: users[i % users.length]._id
       };

@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { protect, authorize } = require('../middleware/auth');
-const { upload } = require('../utils/upload');
+const { upload, handleUploadError } = require('../utils/upload');
 const {
   getUsers,
   getUser,
@@ -54,12 +54,24 @@ router.put('/:id', protect, [
 // @desc    Upload avatar
 // @route   POST /api/users/:id/avatar
 // @access  Private
-router.post('/:id/avatar', protect, upload.single('avatar'), uploadAvatar);
+//
+// WHY `handleUploadError` is mounted right after `upload.single(...)`:
+// multer's `fileFilter`/file-size rejections (see server/utils/upload.js)
+// surface as a plain `Error` passed to `next(error)`, which — without this
+// handler catching it first — falls through to the generic
+// `server/middleware/errorHandler.js`. That handler only special-cases
+// Mongoose/JWT error shapes, so an unrecognized plain `Error` defaults to
+// `statusCode = 500`, turning a client mistake (wrong file type, file too
+// large) into a misleading "500 Internal Server Error" instead of the 400
+// `handleUploadError` was written to produce. `handleUploadError` existed
+// in utils/upload.js already but was never wired into any route — dead
+// code that silently defeated its own purpose.
+router.post('/:id/avatar', protect, upload.single('avatar'), handleUploadError, uploadAvatar);
 
 // @desc    Upload resume
 // @route   POST /api/users/:id/resume
 // @access  Private
-router.post('/:id/resume', protect, upload.single('resume'), uploadResume);
+router.post('/:id/resume', protect, upload.single('resume'), handleUploadError, uploadResume);
 
 // @desc    Add skill
 // @route   POST /api/users/:id/skills

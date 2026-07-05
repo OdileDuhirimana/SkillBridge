@@ -53,12 +53,32 @@ const messageSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
+  // WHY no `ref` here: same root cause as `chatSchema.lastMessage` above —
+  // this id addresses another entry in the *same* embedded `messages`
+  // array (a "replying to this earlier message" relationship within one
+  // chat), not a document in a separate `Message` collection that was
+  // never registered. `.populate('messages.replyTo')` against this ref
+  // (previously present in server/routes/chats.js and
+  // server/socket/socketHandlers.js) threw `MissingSchemaError` on every
+  // call — a second instance of the exact same bug class as `lastMessage`.
+  // Use the `replyToPreview` virtual below instead.
   replyTo: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'Message'
+    type: mongoose.Schema.ObjectId
   }
 }, {
   timestamps: true
+});
+
+// Virtual replacement for the removed `.populate('messages.replyTo')` call:
+// resolves `replyTo` against the parent chat's own `messages` array. Mongoose
+// gives every array subdocument a `.parent()` accessor pointing back to the
+// document that owns it (the Chat here, since `messages` is a top-level
+// embedded array — not itself nested inside another subdocument).
+messageSchema.virtual('replyToPreview').get(function() {
+  if (!this.replyTo) return undefined;
+  const parentChat = this.parent();
+  if (!parentChat || !parentChat.messages) return undefined;
+  return parentChat.messages.id(this.replyTo);
 });
 
 const chatSchema = new mongoose.Schema({
@@ -109,9 +129,20 @@ const chatSchema = new mongoose.Schema({
     maxlength: [500, 'Chat description cannot be more than 500 characters']
   },
   messages: [messageSchema],
+  // WHY no `ref` here: `lastMessage` stores the `_id` of an entry in the
+  // `messages` array above, which is an embedded subdocument array, not a
+  // separately registered `mongoose.model()`/top-level collection. A `ref`
+  // to a model name ('Message') that Mongoose never compiled would cause
+  // `.populate('lastMessage')` to throw `MissingSchemaError` at query time
+  // (previously present in server/routes/chats.js — a real bug: messages
+  // were intentionally embedded for atomic chat updates, not modeled as a
+  // separate collection, so there is nothing valid to populate against).
+  // Consumers that need the actual message content should use the
+  // `lastMessagePreview` virtual below, which looks the subdocument up by
+  // id directly from the already-loaded `messages` array — no extra query,
+  // no populate, and no dependency on a model that doesn't exist.
   lastMessage: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'Message'
+    type: mongoose.Schema.ObjectId
   },
   isActive: {
     type: Boolean,
@@ -186,6 +217,18 @@ chatSchema.index({
   'participants.user': 1, 
   'metadata.unreadCount': 1,
   isActive: 1 
+});
+
+// Virtual replacement for the removed `.populate('lastMessage')` call:
+// resolves the `lastMessage` id against the already-loaded embedded
+// `messages` array instead of issuing (or attempting) a cross-collection
+// populate. Returns `undefined` if the chat has no messages yet, which
+// callers/consumers should treat as "no preview available".
+chatSchema.virtual('lastMessagePreview').get(function() {
+  if (!this.lastMessage || !this.messages || this.messages.length === 0) {
+    return undefined;
+  }
+  return this.messages.id(this.lastMessage);
 });
 
 // Virtual for unread count per user

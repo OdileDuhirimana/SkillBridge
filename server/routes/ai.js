@@ -6,7 +6,7 @@ const pdfParse = require('pdf-parse');
 const fs = require('fs');
 const path = require('path');
 const { protect } = require('../middleware/auth');
-const { upload } = require('../utils/upload');
+const { upload, handleUploadError } = require('../utils/upload');
 
 const router = express.Router();
 
@@ -33,7 +33,13 @@ const ensureOpenAIConfigured = (res) => {
 // @desc    Analyze resume
 // @route   POST /api/ai/analyze-resume
 // @access  Private
-router.post('/analyze-resume', protect, upload.single('resume'), async (req, res) => {
+//
+// WHY `handleUploadError` follows `upload.single(...)`: see the identical
+// rationale in server/routes/users.js — without it, a rejected file
+// (wrong type/too large) reaches the generic error handler as a plain
+// `Error` and gets misreported as a 500 instead of the 400
+// `handleUploadError` produces.
+router.post('/analyze-resume', protect, upload.single('resume'), handleUploadError, async (req, res) => {
   try {
     if (!ensureOpenAIConfigured(res)) {
       return;
